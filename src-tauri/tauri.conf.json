@@ -46,7 +46,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4MTFDMzQ2MUI2NjFDQUQKUldTdEhHWWJSc01SR0J2RWNFSDhMS21SQVdoUjVIYUpobm5HUHNFUC8wUmhaQ1psK3FGcGwrelUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ2QzdBQUZGQTE5MzM1MUUKUldRZU5aT2gvNnJIUmdEbFYvWkNOem5GNTg2WFY3ZVZneTUzTit5bFVDZnhzUXlSS1gvVUROeTkK",
       "endpoints": [
         "https://github.com/appbuildersweden/Lumi/releases/latest/download/latest.json"
       ]

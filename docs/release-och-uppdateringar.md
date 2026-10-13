@@ -29,8 +29,8 @@ Uppdateringar verifieras med en minisign-nyckel. Den **publika** nyckeln står i
 Den **privata** nyckeln får aldrig ligga i appen, i GitHub-repot, i en
 release eller på webbplatsen. Den används bara när en release byggs.
 
-Nyckeln som hör till den publika nyckeln i konfigurationen skapades så här och
-ligger utanför repot:
+Nyckeln hör till den publika nyckeln i konfigurationen och ligger utanför
+repot. Den skapades med ett eget lösenord:
 
 ```bash
 npx tauri signer generate -w "$USERPROFILE/.lumi/lumi-updater.key"
@@ -39,15 +39,32 @@ npx tauri signer generate -w "$USERPROFILE/.lumi/lumi-updater.key"
 Filen ligger i `%USERPROFILE%\.lumi\lumi-updater.key`. `*.key` är spärrat i
 `.gitignore`, så en nyckel som råkar hamna i projektmappen kan inte checkas in.
 
-**Behöver göras innan den första offentliga releasen:** skapa en egen nyckel med
-ett eget lösenord, byt ut den publika nyckeln i `tauri.conf.json` och förvara den
-privata nyckeln som hemlighet (GitHub → Settings → Secrets → Actions, namnen
-`TAURI_SIGNING_PRIVATE_KEY` och `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Den
-nyckel som finns nu är skapad utan lösenord för att bygget ska kunna testas
-lokalt.
+Lösenordet ligger inte i klartext någonstans. Det förvaras DPAPI-krypterat i
+`%USERPROFILE%\.lumi\lumi-updater-password.dpapi`, och bara den Windows-användare
+som skapade filen kan läsa den. Hämta det till en byggsession så här:
 
-Tappas den privata nyckeln bort kan inga fler uppdateringar signeras – då måste
-användarna installera en ny version manuellt en gång.
+```powershell
+$s = Get-Content "$env:USERPROFILE\.lumi\lumi-updater-password.dpapi" | ConvertTo-SecureString
+$b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)
+```
+
+Lösenordet behövs också som hemlighet i GitHub (Settings → Secrets → Actions,
+namnen `TAURI_SIGNING_PRIVATE_KEY` och `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) om
+releaser ska byggas automatiskt. Kopiera det då från kommandot ovan – det visas
+inte någon annanstans. Den 13 oktober 2026 låg hemligheterna ännu inte i GitHub,
+eftersom releasen byggdes lokalt.
+
+Utan lösenordet går det inte att signera: `tauri signer sign` svarar
+*Wrong password for that key*. Det är avsiktligt – nyckelfilen är värdelös för
+den som kommer över den utan lösenordet.
+
+Tappas den privata nyckeln eller lösenordet bort kan inga fler uppdateringar
+signeras – då måste användarna installera en ny version manuellt en gång.
+
+Den förra nyckeln, som saknade lösenord, ligger kvar som
+`%USERPROFILE%\.lumi\lumi-updater-utan-losenord.bak.key`. Den hör inte till
+någon release och kan raderas.
 
 ## 3. Bygga en release lokalt
 
@@ -62,6 +79,7 @@ cd src-tauri && cargo test --all-targets && cd ..
 
 # 3. Bygg installationsfilen
 export TAURI_SIGNING_PRIVATE_KEY="$USERPROFILE/.lumi/lumi-updater.key"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<lösenordet ur DPAPI-filen ovan>"
 npm run tauri build -- --bundles nsis
 ```
 
