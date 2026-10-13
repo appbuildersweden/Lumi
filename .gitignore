@@ -16,6 +16,11 @@ dist-ssr
 .env
 .env.*
 
+# Signeringsnycklar för uppdateringar. Den privata nyckeln ska ligga utanför
+# repot, men spärren ligger här som ett skyddsnät.
+*.key
+*.key.pub
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -53,6 +53,9 @@ pub enum AppError {
     #[error("AI:n svarade i ett format som Lumi inte kunde läsa. Försök igen.")]
     UnreadableResponse,
 
+    #[error("Kunde inte kontrollera uppdateringar: {0}")]
+    Update(String),
+
     #[error("Innehållet godkändes inte: {0}")]
     Validation(String),
 
@@ -78,6 +81,7 @@ impl AppError {
             AppError::Model(_) => "model",
             AppError::Api { .. } => "api",
             AppError::UnreadableResponse => "unreadable-response",
+            AppError::Update(_) => "update",
             AppError::Validation(_) => "validation",
             AppError::Storage(_) => "storage",
         }
@@ -173,6 +177,7 @@ mod tests {
             AppError::Unauthorized,
             AppError::InsufficientCredits,
             AppError::Model("okänd modell".to_string()),
+            AppError::Update("ingen release ännu".to_string()),
             AppError::Validation("fel format".to_string()),
             AppError::Storage("disk full".to_string()),
             AppError::UnreadableResponse,
@@ -211,6 +216,10 @@ mod tests {
         assert_eq!(AppError::RateLimited.kind(), "rate-limited");
         assert_eq!(AppError::UnreadableResponse.kind(), "unreadable-response");
         assert_eq!(
+            AppError::Update("nätet nere".to_string()).kind(),
+            "update"
+        );
+        assert_eq!(
             AppError::Api {
                 status: 500,
                 message: "fel".to_string()
@@ -228,6 +237,7 @@ mod tests {
             AppError::InsufficientCredits.to_string(),
             AppError::RateLimited.to_string(),
             AppError::Network("x".to_string()).to_string(),
+            AppError::Update("x".to_string()).to_string(),
         ];
 
         for message in messages {

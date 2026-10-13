@@ -27,12 +27,13 @@ All text, navigering, funktionskort, stegen och nedladdningsuppgifterna ligger i
 Installationsfilen finns inte ännu, och därför visas en inaktiverad knapp med
 texten **Kommer snart** – aldrig en länk som inte leder någonstans.
 
-När `.exe`-filen är byggd och uppladdad: öppna `src/content.ts` och sätt
+Adressen till filen ligger redan i `src/content.ts` och är den samma för varje
+version, eftersom kopian i releasen heter `Lumi-setup.exe`. När releasen finns:
 
 ```ts
 export const DOWNLOAD: DownloadInfo = {
-  available: true,
-  url: "https://…/Lumi_0.1.0_x64-setup.exe",
+  available: true,           // false tills releasen är gjord
+  url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
   version: "0.1.0",
   requirements: ["Windows 10 eller 11 (64-bitars)"],
   steps: ["Hämta filen", "Kör installationsprogrammet", "Starta Lumi"],
@@ -40,7 +41,8 @@ export const DOWNLOAD: DownloadInfo = {
 ```
 
 Sektionen visar då en riktig nedladdningsknapp samt systemkrav och
-installationssteg. Ingen annan ändring behövs.
+installationssteg. Ingen annan ändring behövs. Hur releasen skapas står i
+[../docs/release-och-uppdateringar.md](../docs/release-och-uppdateringar.md).
 
 ## Publicera på Cloudflare Pages
 

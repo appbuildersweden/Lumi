@@ -125,26 +125,34 @@ cd src-tauri && cargo test --all-targets       # Rust, med testerna
 cd src-tauri && cargo test -- --ignored        # testerna som läser .env
 ```
 
-## Bygga en Windows-installation eller .exe
+## Bygga en Windows-installation
+
+Signeringsnyckeln behövs för att uppdateringsfilerna ska kunna verifieras. Den
+ligger utanför repot, se [docs/release-och-uppdateringar.md](docs/release-och-uppdateringar.md).
 
 ```bash
-npm run tauri build
+export TAURI_SIGNING_PRIVATE_KEY="$USERPROFILE/.lumi/lumi-updater.key"
+npm run tauri build -- --bundles nsis
 ```
 
-Resultatet hamnar i `src-tauri/target/release/bundle/`:
+Resultatet hamnar i `src-tauri/target/release/bundle/nsis/`:
 
-- `msi/Lumi_0.1.0_x64_en-US.msi` – Windows-installation
-- `nsis/Lumi_0.1.0_x64-setup.exe` – installationsprogram (`.exe`)
+- `Lumi_0.1.0_x64-setup.exe` – installationsprogrammet, och samma fil som en
+  uppdatering hämtar (3,7 MB)
+- `Lumi_0.1.0_x64-setup.exe.sig` – signaturen som appen verifierar vid en
+  uppdatering
 
 Själva programfilen utan installation ligger i
 `src-tauri/target/release/Lumi.exe` (kräver WebView2, som finns inbyggt i
 Windows 10/11).
 
-Vill du bara bygga installationsprogrammet för `.exe`:
+Installationen sker **för den aktuella användaren** och kräver därför varken
+administratörsbehörighet eller ett lösenord (`installMode: "currentUser"` i
+`src-tauri/tauri.conf.json`). MSI väljs bort med flit: MSI-installationen
+kräver administratör.
 
-```bash
-npm run tauri build -- --bundles nsis
-```
+Hur en ny version publiceras, och hur versionskontrollen i appen hänger ihop
+med releasen, står i [docs/release-och-uppdateringar.md](docs/release-och-uppdateringar.md).
 
 ## Struktur
 

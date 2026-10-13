@@ -83,9 +83,13 @@ export const STEPS: Step[] = [
  * Nedladdningen. Installationsfilen finns inte ännu, och därför visas inga
  * uppgifter om version, systemkrav eller installationssteg i gränssnittet.
  *
- * När filen är byggd och publicerad: sätt `available` till true, fyll i `url`
- * och lägg till de uppgifter som gäller. Ingen annan ändring behövs – sektionen
- * visar då en riktig nedladdningsknapp i stället för "Kommer snart".
+ * Adressen nedan är den som gäller när releasen finns: filen heter alltid
+ * `Lumi-setup.exe` i den senaste releasen, så samma länk fungerar för varje
+ * version. Så länge `available` är false skapas ingen länk – knappen visar
+ * "Kommer snart". Vid publicering: sätt `available` till true och fyll i
+ * version, systemkrav och installationssteg.
+ *
+ * Stegen finns i docs/release-och-uppdateringar.md.
  */
 export interface DownloadInfo {
   available: boolean;
@@ -97,7 +101,7 @@ export interface DownloadInfo {
 
 export const DOWNLOAD: DownloadInfo = {
   available: false,
-  url: null,
+  url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
   version: "",
   requirements: [],
   steps: [],

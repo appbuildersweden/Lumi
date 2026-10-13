@@ -12,6 +12,7 @@ mod error;
 mod materials;
 mod openrouter;
 mod storage;
+mod update;
 
 use tauri::Manager;
 
@@ -50,6 +51,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Uppdateringar: signaturen kontrolleras mot den publika nyckeln i
+        // tauri.conf.json. Den privata nyckeln finns bara där en release byggs.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let directory = commands::storage_dir(app.handle())?;
             let storage = Storage::new(directory)?;
@@ -87,6 +91,24 @@ pub fn run() {
                 models: tokio::sync::Mutex::new(None),
                 session: std::sync::Mutex::new(None),
                 login_guard: auth::LoginGuard::new(),
+            });
+
+            // Versionskontrollen sker i bakgrunden, så att starten inte väntar
+            // på nätet. Den laddar inte ner eller installerar något själv – en
+            // installation kräver ett beslut i gränssnittet. Finns ingen release
+            // ännu, eller inget nät, skrivs det bara ut i terminalen.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match update::check(&handle).await {
+                    Ok(Some(info)) => println!(
+                        "Lumi: version {} finns att hämta (du kör {}).",
+                        info.version, info.current_version
+                    ),
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("Lumi: versionskontrollen kunde inte genomföras ({error}).")
+                    }
+                }
             });
 
             Ok(())
@@ -143,6 +165,7 @@ pub fn run() {
             commands::list_attempts,
             commands::get_settings,
             commands::update_settings,
+            update::check_for_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

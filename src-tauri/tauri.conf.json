@@ -28,13 +28,28 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4MTFDMzQ2MUI2NjFDQUQKUldTdEhHWWJSc01SR0J2RWNFSDhMS21SQVdoUjVIYUpobm5HUHNFUC8wUmhaQ1psK3FGcGwrelUK",
+      "endpoints": [
+        "https://github.com/appbuildersweden/Lumi/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
