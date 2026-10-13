@@ -1,0 +1,7 @@
+# Wranglers lokala tillstånd: cache och enhets-id för driftsättningen.
+# Hör till datorn, inte till projektet.
+.wrangler/
+
+# Byggda filer, om något verktyg lägger dem här.
+dist/
+node_modules/

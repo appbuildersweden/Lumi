@@ -1,0 +1,24 @@
+# Lumi – AI-tjänsten.
+#
+# Hemligheterna sätts inte här, utan med `wrangler secret put` (se README.md):
+#
+#   OPENROUTER_API_KEY   nyckeln till OpenRouter. Ligger bara här.
+#   LUMI_CLIENT_TOKEN    markeringen Lumis app skickar med varje anrop.
+#
+# `wrangler.toml` ligger i repot och får därför aldrig innehålla en nyckel.
+
+name = "lumi-ai"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# Loggarna används för att se vilken modell som användes och varför ett anrop
+# avvisades. Ingen nyckel och inget samtalsinnehåll skrivs ut.
+[observability]
+enabled = true
+
+# Räknarna för takten. En rad per konto och minut, och en per dygn.
+[[d1_databases]]
+binding = "DB"
+database_name = "lumi-ai-limits"
+database_id = "75e2a262-4e18-4bea-ad82-44e3af73a29c"
