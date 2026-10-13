@@ -10,11 +10,16 @@ installationsfilen går att hämta från
 och nedladdningsknappen på webbplatsen är aktiv. Version 0.1.0 ligger kvar
 oförändrad på sin egen adress.
 
-**Version 0.1.2 är byggd och signerad men ännu inte uppladdad.** Filerna
-ligger i `src-tauri/target/release/bundle/nsis/` och publiceras som i avsnitt 4.
-Innan dess ska AI-tjänsten vara driftsatt och markeringen i appen stämma med
-hemligheten hos tjänsten – se [ai-proxy/README.md](../ai-proxy/README.md) och
-kravlistan i avsnitt 7.
+**Version 0.1.2 är publicerad.** Releasen ligger på
+<https://github.com/appbuildersweden/Lumi/releases/tag/v0.1.2>, och
+`releases/latest/download/Lumi-setup.exe` hämtar nu 0.1.2 – samma fil som
+byggdes och signerades (SHA-256 `33d09576a22bddafe975598e04b6cd626520138b0716d01c84d7e7705adc925b`).
+Webbplatsen visar version 0.1.2 och är omladdad.
+
+**AI:n kräver en driftsatt tjänst.** Sedan 0.1.2 går alla AI-anrop genom
+tjänsten i [ai-proxy/](../ai-proxy/README.md), och markeringen `GATEWAY_TOKEN` i
+`src-tauri/src/config.rs` måste vara exakt samma värde som hemligheten
+`LUMI_CLIENT_TOKEN` hos tjänsten. Är de olika får ingen elev något svar.
 
 **Den som har 0.1.0 installerad får uppdateringen först vid en manuell
 installation av 0.1.1.** 0.1.0 kan bara *upptäcka* en ny version – den skriver
@@ -122,26 +127,40 @@ samma fil kan kontrolleras efter uppladdningen.
 
 ## 4. Publicera releasen
 
-1. Skapa en release på GitHub med en tagg som `v0.1.1` (inte förhandsversion och
-   inte utkast – `releases/latest` hoppar över båda).
-2. Ladda upp filerna från `src-tauri/target/release/bundle/nsis/`:
-   `Lumi_<version>_x64-setup.exe`, `Lumi_<version>_x64-setup.exe.sig`,
-   `Lumi-setup.exe` och `latest.json`.
-3. Kontrollera att adressen
-   `releases/latest/download/Lumi-setup.exe` ger samma SHA-256 som skriptet
-   skrev ut.
+Publiceringen görs med ett skript, så att samma fem filer alltid följer med och
+att ingen av dem glöms:
+
+```bash
+node scripts/publicera-release.mjs            # publicerar den byggda versionen
+node scripts/publicera-release.mjs --kontroll # visar läget utan att ändra något
+```
+
+Skriptet skapar releasen som ett **utkast**, laddar upp alla filer och gör den
+offentlig först när de ligger på plats. Ett utkast syns inte i
+`releases/latest`, så ingen installerad Lumi kan råka hämta ett manifest medan
+installationsfilen ännu saknas. Till sist hämtar skriptet tillbaka filerna från
+`releases/latest/download/...` och kontrollerar att versionen är rätt och att
+SHA-256 stämmer med filen som byggdes.
+
+Filerna som publiceras, i den ordning de laddas upp:
+`Lumi_<version>_x64-setup.exe`, `Lumi_<version>_x64-setup.exe.sig`,
+`Lumi-setup.exe`, `Lumi-setup.exe.sig` och `latest.json`. Manifestet sist – det
+är filen apparna frågar efter.
+
+Releasen skapas inte som förhandsversion eller utkast i sitt färdiga skick:
+`releases/latest` hoppar över båda.
 
 `latest.json` ser ut så här:
 
 ```json
 {
-  "version": "0.1.1",
+  "version": "0.1.2",
   "notes": "Kort om vad som är nytt.",
-  "pub_date": "2026-10-13T12:00:00Z",
+  "pub_date": "2026-10-14T01:06:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "innehållet i Lumi_0.1.1_x64-setup.exe.sig",
-      "url": "https://github.com/appbuildersweden/Lumi/releases/download/v0.1.1/Lumi-setup.exe"
+      "signature": "innehållet i Lumi_0.1.2_x64-setup.exe.sig",
+      "url": "https://github.com/appbuildersweden/Lumi/releases/download/v0.1.2/Lumi-setup.exe"
     }
   }
 }
@@ -218,7 +237,7 @@ konfigurationen använder enbart `https` mot GitHub.
 
 ## 6. Nedladdningsknappen på webbplatsen
 
-I `website/src/content.ts`:
+I `website/src/content.ts` (versionsnumret är det som senast publicerades):
 
 ```ts
 export const DOWNLOAD: DownloadInfo = {
