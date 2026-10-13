@@ -24,24 +24,29 @@ All text, navigering, funktionskort, stegen och nedladdningsuppgifterna ligger i
 
 ## Nedladdningen
 
-Installationsfilen finns inte ännu, och därför visas en inaktiverad knapp med
-texten **Kommer snart** – aldrig en länk som inte leder någonstans.
-
-Adressen till filen ligger redan i `src/content.ts` och är den samma för varje
-version, eftersom kopian i releasen heter `Lumi-setup.exe`. När releasen finns:
+Knappen är aktiv och hämtar filen från releasen:
 
 ```ts
 export const DOWNLOAD: DownloadInfo = {
-  available: true,           // false tills releasen är gjord
+  available: true,           // false visar en inaktiverad knapp i stället
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
-  version: "0.1.0",
+  version: "0.1.2",          // måste höjas för hand vid varje release
   requirements: ["Windows 10 eller 11 (64-bitars)"],
   steps: ["Hämta filen", "Kör installationsprogrammet", "Starta Lumi"],
 };
 ```
 
-Sektionen visar då en riktig nedladdningsknapp samt systemkrav och
-installationssteg. Ingen annan ändring behövs. Hur releasen skapas står i
+Adressen är den samma för varje version, eftersom kopian i releasen heter
+`Lumi-setup.exe` – men **versionsnumret i `content.ts` syns som text på sidan
+ovanför knappen**. Efter varje versionshöjning måste webbplatsen därför byggas
+och laddas upp igen, annars visar sidan det gamla numret medan knappen hämtar
+den nya filen:
+
+```bash
+cd website && npm run build && npx wrangler pages deploy dist
+```
+
+Sidan ligger på <https://lumi-webbplats.pages.dev>. Hur releasen skapas står i
 [../docs/release-och-uppdateringar.md](../docs/release-och-uppdateringar.md).
 
 ## Publicera på Cloudflare Pages

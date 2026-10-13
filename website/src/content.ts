@@ -80,7 +80,8 @@ export const STEPS: Step[] = [
 ];
 
 /**
- * Nedladdningen. Version 0.1.1 är publicerad och knappen är aktiv.
+ * Nedladdningen. Versionen nedan är den som senast byggdes; knappen hämtar
+ * alltid `releases/latest`, alltså samma fil varje gång.
  *
  * Adressen är den fasta adressen till senaste releasen: filen heter alltid
  * `Lumi-setup.exe` där, så samma länk fungerar för varje version utan ändring.
@@ -100,7 +101,7 @@ export interface DownloadInfo {
 export const DOWNLOAD: DownloadInfo = {
   available: true,
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
-  version: "0.1.1",
+  version: "0.1.2",
   requirements: [
     "Windows 10 eller 11 (64-bitars)",
     "Ingen administratörsbehörighet behövs – Lumi installeras för din egen användare",

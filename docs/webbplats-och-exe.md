@@ -3,11 +3,17 @@
 Det här dokumentet beskriver vad som redan går att återanvända och vad som måste
 bestämmas innan Lumi finns som webbplats eller som färdig Windows-app.
 
-**Ingen webbplats är publicerad och ingen `.exe` är skapad.** Webbplatsen i
-[website/](../website/README.md) är byggd som ett eget Vite-projekt och går att
-köra lokalt, men den är inte uppladdad och innehåller varken inloggning, databas
-eller AI. Ingen extern tjänst är inkopplad. Lagring och inloggning i appen ligger
-kvar precis som de är tills en migreringsplan har godkänts.
+**Läget har ändrats sedan det här dokumentet skrevs.** Webbplatsen ligger på
+<https://lumi-webbplats.pages.dev>, och Windows-appen finns som installerbar
+`.exe` med automatiska uppdateringar – se
+[release-och-uppdateringar.md](release-och-uppdateringar.md). Ett undantag från
+"ingen extern tjänst": AI:n går sedan 0.1.2 via Lumis egen AI-tjänst i
+[ai-proxy/](../ai-proxy/README.md), som håller OpenRouter-nyckeln utanför appen.
+
+Avsnitten 3–8 nedan är fortfarande en plan för en framtida gemensam
+webbapplikation: de beskriver vad som skiljer desktopappen från en server, inte
+vad som är gjort. Lagring och inloggning i appen ligger kvar precis som de är
+tills en migreringsplan har godkänts.
 
 ## 1. Det som kan återanvändas rakt av
 
@@ -85,18 +91,36 @@ En gemensam backend behöver minst:
 
 ## 5. AI säkert från både app och webbplats
 
-I dag:
+Sedan 0.1.2 går all AI genom en egen tjänst i stället för direkt till
+OpenRouter:
 
-- Nyckeln läses bara i Rust: Windows Credential Manager, annars miljövariabeln `OPENROUTER_API_KEY`, och `.env` i utvecklingsläge.
-- Nyckeln skickas bara till OpenRouter. Gränssnittet får status (`ai_status`) och förbrukning (`check_api_key`) – aldrig nyckeln.
-- Alla AI-anrop (`chat_stream`, `generate_material`, `check_api_key`, `list_models`) kräver en inloggad användare.
-- Vid modellfel byter chatten till en reservmodell; vid nätverks-, kredit- eller nyckelfel avbryts i stället för att försöka dyrare.
+```
+appen (Rust)  ->  lumi-ai på Cloudflare  ->  OpenRouter
+```
+
+- Nyckeln ligger som en hemlighet hos tjänsten. Den finns inte i appen, inte i
+  installationsfilen och inte i repot – den behöver därför inte längre sättas i
+  någons miljövariabler, och inget bygge kan råka få med den.
+- Appen skickar bara en markering (`X-Lumi-Client`) och ett hashat konto-id
+  (`X-Lumi-User`). Markeringen är ingen nyckel: den kan läsas ur appen och bytas.
+- Tjänsten avvisar anrop utan markering, begränsar takten per konto och per
+  dygn, tillåter bara kända modeller och en begränsad anropsstorlek.
+- Alla AI-kommandon (`chat_stream`, `generate_material`, `check_api_key`,
+  `list_models`) kräver fortfarande en inloggad användare i appen.
+- Saknar kontot krediter byter tjänsten automatiskt till en gratismodell och
+  märker svaret (`X-Lumi-Fallback`), så att gränssnittet kan berätta det i
+  stället för att svaret ser ut att komma från en dyrare modell.
 
 På webben:
 
-- Nyckeln får aldrig ligga i klientkoden eller i ett bygge. Anropet måste gå via servern, precis som i appen.
-- Servern behöver ett skydd mot att en inloggad användare kan bränna obegränsat med pengar (tak per användare eller per dag).
-- Beslut: en gemensam nyckel för installationen, eller en nyckel per skola/användare? Om servern betalar behöver förbrukningen loggas per användare.
+- Samma tjänst kan användas av en framtida webbklient. Då behöver tjänsten
+  kunna kontrollera användaren på riktigt (en signerad session i stället för ett
+  id som klienten själv uppger), annars gäller samma svaghet som i dag: den som
+  har appen kan låna markeringen.
+- Taket per konto finns redan; med riktiga konton kan förbrukningen dessutom
+  loggas per användare.
+- Beslut kvar: en gemensam nyckel för installationen, eller en nyckel per
+  skola? Om tjänsten betalar för allt bör förbrukningen följas upp.
 
 ## 6. Cloudflare Pages specifikt
 

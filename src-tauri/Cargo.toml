@@ -1,6 +1,6 @@
 [package]
 name = "lumi"
-version = "0.1.1"
+version = "0.1.2"
 description = "Lumi – en studeapp för Windows"
 authors = ["Lumi"]
 edition = "2024"

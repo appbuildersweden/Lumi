@@ -10,6 +10,12 @@ installationsfilen går att hämta från
 och nedladdningsknappen på webbplatsen är aktiv. Version 0.1.0 ligger kvar
 oförändrad på sin egen adress.
 
+**Version 0.1.2 är byggd och signerad men ännu inte uppladdad.** Filerna
+ligger i `src-tauri/target/release/bundle/nsis/` och publiceras som i avsnitt 4.
+Innan dess ska AI-tjänsten vara driftsatt och markeringen i appen stämma med
+hemligheten hos tjänsten – se [ai-proxy/README.md](../ai-proxy/README.md) och
+kravlistan i avsnitt 7.
+
 **Den som har 0.1.0 installerad får uppdateringen först vid en manuell
 installation av 0.1.1.** 0.1.0 kan bara *upptäcka* en ny version – den skriver
 en rad i terminalen men saknar kod för att hämta och installera. Den automatiska
@@ -179,23 +185,32 @@ nedladdning och installation faktiskt fungerar. För det behövs ett test där e
 *äldre* version möter ett manifest för en nyare:
 
 1. Bygg en testvariant av samma kod med en lägre version och en lokal adress:
-   `npm run tauri build -- --no-bundle --config '{"version":"0.1.0",
+   `npm run tauri build -- --no-bundle --config '{"version":"0.1.1",
    "bundle":{"createUpdaterArtifacts":false},"plugins":{"updater":
    {"endpoints":["http://127.0.0.1:8765/latest.json"],
    "dangerousInsecureTransportProtocol":true}}}'`.
-2. Servera det riktiga `latest.json` (med `url` ändrad till den lokala adressen)
-   och en kopia av den byggda installationsfilen på `127.0.0.1:8765`.
+2. Servera det riktiga `latest.json` och en kopia av den byggda
+   installationsfilen på `127.0.0.1:8765`. Det gör `scripts/uppdateringsprov.mjs`:
+   den läser det färdiga manifestet, skriver om `url` till den lokala adressen
+   och serverar båda filerna. Signatur, filstorlek och innehåll är alltså
+   desamma som i releasen.
 3. Starta testvarianten och följ den: versionen ska bytas i
    `%LOCALAPPDATA%\Lumi` och avinstallationsposten i registret likaså. Att
    installationsprogrammet startar om Lumi syns som att en process från den
    installerade sökvägen tar över.
-4. Upprepa med en medvetet trasig signatur i manifestet. Då ska inget
-   installeras, versionen vara oförändrad och raden *The signature verification
-   failed* synas – filen får aldrig nå installationen.
+4. Upprepa med en medvetet trasig signatur i manifestet:
+   `node scripts/uppdateringsprov.mjs --trasig`. Då ska inget installeras,
+   versionen vara oförändrad och raden *The signature verification failed*
+   synas – filen får aldrig nå installationen.
 5. Till sist: låt testvarianten hämta **den publicerade** filen från GitHub
-   (`url` i manifestet pekar på `releases/download/v0.1.1/Lumi-setup.exe`). Det
-   bevisar att släppets egna filer går att verifiera och installera, inte bara de
-   lokalt byggda.
+   (`url` i manifestet pekar på `releases/download/v<version>/Lumi-setup.exe`).
+   Det bevisar att släppets egna filer går att verifiera och installera, inte
+   bara de lokalt byggda.
+
+Kontrollera att den installerade filen verkligen är den nya versionen, inte
+testvarianten: den ska innehålla GitHub-adressen i `endpoints` och **inte**
+`127.0.0.1:8765`. Verktyget `scripts/uppdateringsprov.mjs` stänger inte av sig
+själv – kör det i ett eget fönster och avbryt med Ctrl+C.
 
 `dangerousInsecureTransportProtocol` och den lokala adressen är bara för det
 här testet och får aldrig finnas i `tauri.conf.json` – den riktiga
@@ -209,7 +224,7 @@ I `website/src/content.ts`:
 export const DOWNLOAD: DownloadInfo = {
   available: true,    // false tills releasen finns
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
-  version: "0.1.1",   // fylls i vid publicering
+  version: "0.1.2",   // fylls i vid publicering
   requirements: ["Windows 10 eller 11 (64-bitars)"],
   steps: ["Hämta filen", "Kör installationsprogrammet", "Starta Lumi"],
 };
@@ -228,3 +243,23 @@ cd website && npm run build && npx wrangler pages deploy dist
 ```
 
 Sidan ligger på <https://lumi-webbplats.pages.dev>.
+
+## 7. Kravlista före publicering av en version
+
+- [ ] `npm run typecheck`, `npm run build` och `cargo test --all-targets`
+      passerar, och `node --test ai-proxy/test` för AI-tjänsten.
+- [ ] AI-tjänsten är driftsatt med `OPENROUTER_API_KEY` och
+      `LUMI_CLIENT_TOKEN` satta som hemligheter.
+- [ ] `config::GATEWAY_TOKEN` i appen är exakt samma värde som hemligheten
+      `LUMI_CLIENT_TOKEN` hos tjänsten. Är de olika får ingen elev något svar.
+- [ ] `cargo test --lib -- --ignored` gör riktiga anrop mot tjänsten och
+      passerar – det bevisar att markeringen stämmer och att reservvägen
+      fungerar.
+- [ ] `cargo test -- --ignored` verifierar att signaturen i `latest.json` hör
+      till den byggda installationsfilen.
+- [ ] Ikonen i den byggda `.exe`-filen är Lumi-märket (se avsnitt 1).
+- [ ] Uppdateringskedjan är provad från den version som användarna har: en
+      installerad äldre version ska upptäcka, hämta, verifiera och installera
+      den nya.
+- [ ] Webbplatsens `DOWNLOAD.version` är samma version som releasen, och
+      webbplatsen är ombyggd och uppladdad.

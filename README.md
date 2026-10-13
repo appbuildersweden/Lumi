@@ -15,37 +15,43 @@ roller, scheman och uppgifter.
 | Ikoner       | `lucide-react`                                                   |
 | Typsnitt     | Plus Jakarta Sans, bundlat lokalt via `@fontsource`              |
 | Styling      | Vanlig CSS i `src/styles/global.css` (inga ramverk)              |
-| AI           | [OpenRouter](https://openrouter.ai) via `reqwest` i Rust         |
-| Nyckellagring| Windows Credential Manager via `keyring`                         |
+| AI           | OpenRouter, via Lumis egen AI-tjänst i `ai-proxy/`               |
+| AI-tjänst    | Cloudflare Worker + D1 (`ai-proxy/`)                             |
 
 Allt körs lokalt i WebView2. Själva studiematerialet ligger på datorn; bara
 AI-anropen går över nätet.
 
 ## AI och API-nyckeln
 
-Lumi anropar OpenRouter **från Rust-backend**, aldrig från gränssnittet.
-Nyckeln skickas därför varken in i frontend-koden eller med i en färdig
-`.exe`-fil.
+Lumi anropar aldrig OpenRouter direkt. Kedjan är:
 
-Nyckeln letas upp i den här ordningen:
-
-1. **Windows Credential Manager** – lägg in den under **Profil → OpenRouter-nyckel**.
-   Den kontrolleras mot OpenRouter innan den sparas.
-2. **Miljövariabeln `OPENROUTER_API_KEY`** – används om ingen nyckel finns i
-   Credential Manager.
-
-Exempel på miljövariabel i Windows (öppna en ny terminal efteråt):
-
-```bat
-setx OPENROUTER_API_KEY "sk-or-v1-..."
+```
+appen (Rust)  ->  Lumis AI-tjänst på Cloudflare  ->  OpenRouter
 ```
 
-I utvecklingsläge läser Lumi även `.env` i projektroten om den finns. Filen
-är gitignorerad och ska aldrig checkas in.
+Nyckeln till OpenRouter ligger som en **hemlighet hos tjänsten**. Den finns
+alltså inte i appen, inte i installationsfilen, inte i det här repot och inte
+på någon elevs dator. Källkoden till tjänsten ligger i `ai-proxy/`, och hur den
+driftsätts står i [ai-proxy/README.md](ai-proxy/README.md).
 
-Modellen ställs in på ett enda ställe i koden:
-`DEFAULT_MODEL` i `src-tauri/src/config.rs`. Eleven kan välja en annan modell
-under **Profil → Modell**; valet sparas i appens inställningar.
+Det appen skickar med varje anrop är två huvuden: en markering som visar att
+anropet kommer från Lumis app, och ett hashat konto-id. Markeringen är ingen
+nyckel – den kan läsas ur appen och bytas – men den gör att tjänsten kan
+avvisa allt som inte kommer från Lumi och räkna anrop per konto.
+
+Tjänsten gör fyra saker: släpper bara in Lumis app och inloggade konton,
+begränsar takten (30 frågor per konto och minut, ett dygnstak för hela
+tjänsten), vidarebefordrar anropet med nyckeln pålagd, och **byter automatiskt
+till en gratismodell** om kontot inte kan använda betalmodellerna. Eleven ser
+då en diskret rad i iChat och Plugga: *AI använder just nu en gratismodell …*.
+
+Modellerna ställs in på ett enda ställe i koden: `config.rs` i appen och
+`ALLOWED_MODELS` i tjänsten. Eleven kan välja en annan modell under
+**Profil → Modell**; valet sparas i appens inställningar.
+
+Under utveckling kan appen pekas mot en lokal tjänst med miljövariablerna
+`LUMI_AI_URL` och `LUMI_AI_TOKEN`. Är bara en av dem satt används den
+inbyggda tjänsten.
 
 ### Var datan sparas
 
@@ -122,8 +128,13 @@ npm run typecheck                              # TypeScript
 npm run build                                  # tsc + produktionsbygge av frontend
 cd src-tauri && cargo check --all-targets      # Rust
 cd src-tauri && cargo test --all-targets       # Rust, med testerna
-cd src-tauri && cargo test -- --ignored        # testerna som läser .env
+cd src-tauri && cargo test --lib -- --ignored  # riktiga anrop mot AI-tjänsten
+node --test ai-proxy/test                      # AI-tjänstens egna tester
 ```
+
+Testerna som är märkta `#[ignore]` gör riktiga anrop mot den driftsatta
+tjänsten. De behöver ingen lokal nyckel, och de kostar ingenting så länge
+kontot använder gratismodellen.
 
 ## Bygga en Windows-installation
 
@@ -137,9 +148,9 @@ npm run tauri build -- --bundles nsis
 
 Resultatet hamnar i `src-tauri/target/release/bundle/nsis/`:
 
-- `Lumi_0.1.0_x64-setup.exe` – installationsprogrammet, och samma fil som en
-  uppdatering hämtar (3,7 MB)
-- `Lumi_0.1.0_x64-setup.exe.sig` – signaturen som appen verifierar vid en
+- `Lumi_<version>_x64-setup.exe` – installationsprogrammet, och samma fil som en
+  uppdatering hämtar
+- `Lumi_<version>_x64-setup.exe.sig` – signaturen som appen verifierar vid en
   uppdatering
 
 Själva programfilen utan installation ligger i
@@ -165,15 +176,17 @@ src/
     Sidebar.tsx           rosa glassmorphism-meny
     ScrollCue.tsx         rund knapp som visar att det finns mer innehåll
     RichText.tsx          enkel visning av AI-text
+    AiNotice.tsx          diskret rad när svaren kommer från en gratismodell
   pages/
     Login.tsx             inloggning mot kontona i backend
-    Home.tsx              startsidan: hero-banner, uppdateringar, framsteg, schema
+    Home.tsx              startsidan: hero-banner, nyheter från skolan, framsteg
+    Announcements.tsx     Information och Meddelanden från skolan
     TeacherChat.tsx       AI-lärare med strömmande svar och samtalsminne
     Study.tsx             Plugga: skapa, granska, spara och öppna material
     Schedule.tsx          Schema: elevens egna poster ur den gemensamma datan
     Progress.tsx          Framsteg: riktiga resultat från quiz och prov
     Profile.tsx           Elevens profil: läsbar, plus nyckel och modell
-    PlaceholderPage.tsx   enhetlig sida för Information och Meddelanden
+    PlaceholderPage.tsx   enhetlig sida för kategorier som ännu är tomma
   admin/
     AdminApp.tsx          adminpanelen: egen sidopanel och de sex kategorierna
     nav.ts                sidopanelens sju poster, i fast ordning
@@ -184,9 +197,13 @@ src/
     pages/                Startsida, Elever, Personal, Konton, Roller,
                           Scheman-hantering och Uppgifter
   styles/global.css       design, färger, glassmorphism och anpassning
+ai-proxy/
+  src/index.js            AI-tjänsten: grind, takt, vidarebefordran, reservmodell
+  test/service.test.mjs   tjänstens tester, med nätverket utbytt mot en attrapp
+  wrangler.toml           driftsättning och D1-bindningen
 src-tauri/src/
   lib.rs                  startpunkt, state och registrerade kommandon
-  config.rs               modellnamn och API-inställningar (en plats)
+  config.rs               modellnamn och tjänstens adress (en plats)
   openrouter.rs           klient: chatt, strömning, scheman, felhantering
   chat.rs                 lärarprompten och samtalshistoriken
   materials.rs            materialtyper, JSON-scheman och validering
@@ -209,11 +226,12 @@ npm run dev      # utvecklingsserver
 npm run build    # typkontroll + statiskt bygge i website/dist
 ```
 
-Installationsfilen finns inte ännu, så nedladdningsknappen visar **Kommer
-snart**. När filen finns räcker det att fylla i `DOWNLOAD` i
-`website/src/content.ts`. Bygget är förberett för Cloudflare Pages
-(`website/wrangler.toml` och `website/public/_headers`), men **inget är
-publicerat eller uppladdat**. Mer i [website/README.md](website/README.md).
+Nedladdningsknappen hämtar filen från
+`releases/latest/download/Lumi-setup.exe`, så adressen är samma för varje
+version. **Efter varje versionshöjning måste `DOWNLOAD` i
+`website/src/content.ts` fyllas i och webbplatsen byggas och laddas upp igen**,
+annars visar sidan det gamla versionsnumret. Mer i
+[website/README.md](website/README.md).
 
 ## Vad som väntar
 
@@ -230,8 +248,6 @@ Följande är byggt men väntar på en egen plats, eller på att färdigställas
 | Elev-kontroll        | uppföljningen finns i koden; egen vy väntar                 |
 | Elevöversikt         | nås från elevregistret tills den får en egen plats          |
 | Lärarvy              | inte byggd ännu                                             |
-| Meddelanden          | platshållare                                                |
-| Information          | platshållare                                                |
 
 Schemats poster gäller en veckodag, inte ett enskilt datum, så kalendern
 markerar veckodagar. Elever och lärare får sina uppgifter och sitt lösenord

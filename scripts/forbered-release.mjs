@@ -63,12 +63,18 @@ const fixedName = path.join(bundle, "Lumi-setup.exe");
 await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 await copyFile(installer, fixedName);
 
+// Signaturen hör till filen den hör till. Kopian med det fasta namnet får sin
+// egen signaturfil – annars ligger en äldre signatur kvar bredvid den nya
+// installationsfilen, och den som kontrollerar för hand får fel svar.
+await copyFile(signatureFile, `${fixedName}.sig`);
+
 const bytes = await readFile(installer);
 const hash = createHash("sha256").update(bytes).digest("hex");
 
 console.log(`Version:        ${version}`);
 console.log(`Installationsfil: ${path.basename(installer)} (${bytes.length} byte)`);
 console.log(`Kopia:          ${path.basename(fixedName)}`);
+console.log(`Signaturkopia:  ${path.basename(fixedName)}.sig`);
 console.log(`Manifest:       ${path.basename(manifestFile)}`);
 console.log(`Nedladdning:    ${url}`);
 console.log(`SHA-256:        ${hash}`);
