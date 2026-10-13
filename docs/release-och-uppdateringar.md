@@ -226,6 +226,16 @@ nedladdning och installation faktiskt fungerar. För det behövs ett test där e
    Det bevisar att släppets egna filer går att verifiera och installera, inte
    bara de lokalt byggda.
 
+**Provet är genomfört mot v0.1.2.** En testvariant byggd som 0.1.1 – samma kod,
+med den riktiga GitHub-adressen i `endpoints` och ingen lokal provadress –
+startades medan den installerade filen var tillfälligt ändrad. Inom några
+sekunder var `%LOCALAPPDATA%\Lumi\Lumi.exe` återställd till den publicerade
+0.1.2 (SHA-256
+`7c2aeda54a5091dbbcdb7624f397d126784a0211761a74b14a34e7a1de507f73`) och en ny
+process hade startat från den installerade sökvägen. Kedjan fungerar alltså mot
+släppet självt: manifestet läses från GitHub, installationsfilen hämtas därifrån,
+signaturen verifieras och installationen körs.
+
 Kontrollera att den installerade filen verkligen är den nya versionen, inte
 testvarianten: den ska innehålla GitHub-adressen i `endpoints` och **inte**
 `127.0.0.1:8765`. Verktyget `scripts/uppdateringsprov.mjs` stänger inte av sig
