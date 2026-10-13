@@ -11,6 +11,7 @@ mod config;
 mod error;
 mod materials;
 mod openrouter;
+mod session;
 mod storage;
 mod update;
 
@@ -90,23 +91,49 @@ pub fn run() {
                 client: OpenRouterClient::new(api_key)?,
                 models: tokio::sync::Mutex::new(None),
                 session: std::sync::Mutex::new(None),
+                session_dir: commands::session_dir(app.handle())?,
                 login_guard: auth::LoginGuard::new(),
             });
 
-            // Versionskontrollen sker i bakgrunden, så att starten inte väntar
-            // på nätet. Den laddar inte ner eller installerar något själv – en
-            // installation kräver ett beslut i gränssnittet. Finns ingen release
-            // ännu, eller inget nät, skrivs det bara ut i terminalen.
-            let handle = app.handle().clone();
+            // Uppdateringar i bakgrunden, så att starten inte väntar på nätet.
+            //
+            // Vid start: finns en nyare version hämtas den, signaturen
+            // kontrolleras och installationen startar. Ingen har hunnit börja
+            // arbeta ännu, så det är det säkraste tillfället – och därför
+            // behöver ingen hämta eller starta en installationsfil själv.
+            // Misslyckas något skrivs det ut och Lumi kör vidare som förut.
+            let starting = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match update::check(&handle).await {
+                match update::check_and_install(&starting).await {
                     Ok(Some(info)) => println!(
-                        "Lumi: version {} finns att hämta (du kör {}).",
+                        "Lumi: installerar version {} (du kör {}).",
                         info.version, info.current_version
                     ),
                     Ok(None) => {}
-                    Err(error) => {
-                        eprintln!("Lumi: versionskontrollen kunde inte genomföras ({error}).")
+                    Err(error) => eprintln!(
+                        "Lumi: uppdateringen kunde inte genomföras ({error}). Lumi fortsätter som det är."
+                    ),
+                }
+            });
+
+            // Under en pågående session installeras inget: en omstart mitt i
+            // arbetet vore ett avbrott. Kontrollen görs ändå med jämna
+            // mellanrum, och en ny version som hittas installeras vid nästa
+            // start i stället.
+            let watching = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let interval = std::time::Duration::from_secs(update::CHECK_INTERVAL_HOURS * 60 * 60);
+                loop {
+                    tokio::time::sleep(interval).await;
+                    match update::check(&watching).await {
+                        Ok(Some(info)) => println!(
+                            "Lumi: version {} finns att hämta och installeras nästa gång Lumi startas (du kör {}).",
+                            info.version, info.current_version
+                        ),
+                        Ok(None) => {}
+                        Err(error) => {
+                            eprintln!("Lumi: versionskontrollen kunde inte genomföras ({error}).")
+                        }
                     }
                 }
             });
@@ -117,6 +144,7 @@ pub fn run() {
             commands::auth_login,
             commands::auth_logout,
             commands::auth_current_user,
+            commands::auth_restore_session,
             commands::auth_create_user,
             commands::auth_list_users,
             commands::auth_update_profile,

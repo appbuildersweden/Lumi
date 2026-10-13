@@ -2478,6 +2478,32 @@ button {
   cursor: not-allowed;
 }
 
+/* Krysset "Håll mig inloggad". Samma formvärld som resten av kortet. */
+.login__remember {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 16px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--plum-700);
+  cursor: pointer;
+  user-select: none;
+}
+
+.login__remember input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--rose-500);
+  cursor: pointer;
+}
+
+.login__remember input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .login__spinner {
   animation: lumi-spin 900ms linear infinite;
 }

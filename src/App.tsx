@@ -15,6 +15,8 @@ import TeacherChat from "./pages/TeacherChat";
 import {
   currentUser,
   landsInAdminPanel,
+  onUpdateEvents,
+  restoreSession,
   runningInTauri,
   signOut,
   type PublicUser,
@@ -24,13 +26,18 @@ export default function App() {
   const [activeView, setActiveView] = useState<ViewId>("home");
   const [user, setUser] = useState<PublicUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [updating, setUpdating] = useState<{
+    version: string;
+    percent: number | null;
+  } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const activeItem =
     NAV_ITEMS.find((item) => item.id === activeView) ?? NAV_ITEMS[0];
 
-  // Frågar backend vem som är inloggad. Sessionen ligger i Rust, så den finns
-  // kvar om fönstret laddas om – men bara så länge appen kör.
+  // Frågar backend vem som är inloggad. Först om en sparad session finns
+  // ("Håll mig inloggad"), annars om någon är inloggad i den här körningen.
+  // Båda svaren kommer från Rust, som kontrollerar kontot mot databasen.
   useEffect(() => {
     if (!runningInTauri) {
       setAuthReady(true);
@@ -38,9 +45,10 @@ export default function App() {
     }
 
     let active = true;
-    currentUser()
+    restoreSession()
+      .then((saved) => saved ?? currentUser())
       .then((found) => {
-        if (active) setUser(found);
+        if (active) setUser(found ?? null);
       })
       .catch(() => {
         // Går sessionen inte att läsa är svaret att logga in på nytt.
@@ -58,6 +66,41 @@ export default function App() {
     contentRef.current?.scrollTo({ top: 0 });
   }, [activeView]);
 
+  // En ny version hämtas och installeras av backend vid start. Här visas bara
+  // att det pågår, så att den korta väntan inte ser ut som en krasch.
+  useEffect(() => {
+    if (!runningInTauri) return undefined;
+
+    let active = true;
+    let stop: (() => void) | null = null;
+
+    onUpdateEvents({
+      available: (info) => setUpdating({ version: info.version, percent: null }),
+      progress: (progress) =>
+        setUpdating((current) => ({
+          version: current?.version ?? "",
+          percent:
+            progress.total && progress.total > 0
+              ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+              : null,
+        })),
+      // Går uppdateringen inte igenom kör Lumi vidare som det är.
+      failed: () => setUpdating(null),
+    })
+      .then((unlisten) => {
+        if (active) stop = unlisten;
+        else unlisten();
+      })
+      .catch(() => {
+        // Utan händelser fungerar appen precis som vanligt.
+      });
+
+    return () => {
+      active = false;
+      stop?.();
+    };
+  }, []);
+
   async function handleSignOut() {
     try {
       await signOut();
@@ -66,6 +109,18 @@ export default function App() {
     }
     setUser(null);
     setActiveView("home");
+  }
+
+  if (updating) {
+    return (
+      <div className="boot" aria-busy="true" role="status">
+        <span className="boot__logo" role="img" aria-label="Lumi" />
+        <p className="boot__text">
+          Uppdaterar Lumi till version {updating.version}
+          {updating.percent !== null ? ` … ${updating.percent} %` : " …"}
+        </p>
+      </div>
+    );
   }
 
   if (!authReady) {

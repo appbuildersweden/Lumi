@@ -17,6 +17,7 @@ export default function Login({ onSignedIn }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +34,7 @@ export default function Login({ onSignedIn }: LoginProps) {
     setError(null);
 
     try {
-      const user = await signIn(email, password);
+      const user = await signIn(email, password, remember);
       setPassword("");
       onSignedIn(user);
     } catch (raw) {
@@ -121,6 +122,18 @@ export default function Login({ onSignedIn }: LoginProps) {
             </button>
           </div>
         </div>
+
+        {/* Sparad session: nästa start går rakt in utan lösenord igen. */}
+        <label className="login__remember">
+          <input
+            type="checkbox"
+            name="remember"
+            checked={remember}
+            onChange={(event) => setRemember(event.target.checked)}
+            disabled={busy || !runningInTauri}
+          />
+          <span>Håll mig inloggad</span>
+        </label>
 
         <button
           type="submit"

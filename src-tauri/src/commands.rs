@@ -17,6 +17,7 @@ use crate::config::{self, ModelRole};
 use crate::error::AppError;
 use crate::materials::{self, GenerateRequest};
 use crate::openrouter::{ChatMessage, ChatUsage, KeyStatus, ModelInfo, OpenRouterClient};
+use crate::session;
 use crate::storage::{
     now_ms, ActivityEntry, AdminMessage, Assignment, Attempt, Exam, ExamResult, Person,
     ScheduleEntry, Settings, Storage, StudyMaterial, Submission,
@@ -30,8 +31,11 @@ pub struct AppState {
     /// Modellistan cachas eftersom den sällan ändras och är stor.
     pub models: tokio::sync::Mutex<Option<Vec<ModelInfo>>>,
     /// Den inloggade eleven. Sessionen ligger i minnet i backend, så inga
-    /// tokens eller lösenord sparas i gränssnittet eller på disk.
+    /// tokens eller lösenord sparas i gränssnittet.
     pub session: std::sync::Mutex<Option<PublicUser>>,
+    /// Mappen där en sparad session kan ligga när "Håll mig inloggad" är
+    /// aktiverat. Filen är skyddad med Windows DPAPI – se `session`.
+    pub session_dir: PathBuf,
     /// Bromsar någon som gissar lösenord om och om igen.
     pub login_guard: auth::LoginGuard,
 }
@@ -86,6 +90,7 @@ pub fn auth_login(
     state: State<'_, AppState>,
     email: String,
     password: String,
+    remember: bool,
 ) -> Result<PublicUser, AppError> {
     let remaining = state.login_guard.locked_for(&email);
     if remaining > 0 {
@@ -96,6 +101,22 @@ pub fn auth_login(
         Ok(user) => {
             state.login_guard.record_success(&email);
             *session(&state) = Some(user.clone());
+
+            // "Håll mig inloggad": sessionen sparas skyddad på disken. Utan
+            // krysset tas en tidigare sparad session bort, så att valet gäller
+            // och inte bara blev kvar från förra gången.
+            let saved = if remember {
+                session::remember(&state.storage, &state.session_dir, &user.id)
+            } else {
+                session::clear(&state.session_dir)
+            };
+
+            // Går det inte att spara stoppas inte inloggningen: allt fungerar
+            // den här gången, det är bara minnet till nästa start som saknas.
+            if let Err(error) = saved {
+                eprintln!("Lumi: sessionen kunde inte sparas ({error}).");
+            }
+
             Ok(user)
         }
         Err(error) => {
@@ -115,7 +136,27 @@ pub fn auth_login(
 #[tauri::command]
 pub fn auth_logout(state: State<'_, AppState>) -> Result<(), AppError> {
     *session(&state) = None;
+
+    // Utloggning ska också ta bort den sparade sessionen, så att nästa start
+    // kräver en ny inloggning.
+    session::clear(&state.session_dir)?;
     Ok(())
+}
+
+/// Återställer en sparad session vid start ("Håll mig inloggad").
+///
+/// Kontot läses om från databasen och kontrolleras här i backend – precis som
+/// vid en vanlig inloggning. Gäller inte sessionen längre returneras `None`,
+/// och gränssnittet visar inloggningen i stället.
+#[tauri::command]
+pub fn auth_restore_session(state: State<'_, AppState>) -> Result<Option<PublicUser>, AppError> {
+    match session::restore(&state.storage, &state.session_dir)? {
+        Some(user) => {
+            *session(&state) = Some(user.clone());
+            Ok(Some(user))
+        }
+        None => Ok(None),
+    }
 }
 
 /// Vem som är inloggad just nu. Gör att en omladdning av fönstret behåller
@@ -1857,6 +1898,14 @@ pub fn storage_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
         .map_err(|err| AppError::Storage(err.to_string()))
 }
 
+/// Mappen där en sparad session kan ligga. Samma mapp som `data`, men filen
+/// ligger bredvid den så att den är lätt att hitta och att ta bort.
+pub fn session_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
+    app.path()
+        .app_data_dir()
+        .map_err(|err| AppError::Storage(err.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{resolve_api_key, role_models};
@@ -1976,6 +2025,200 @@ mod tests {
 /// Det här är kärnan i kravet att en vanlig användare inte kan göra sig själv
 /// till administratör. Rollen läses alltid ur den inloggade sessionen, som i
 /// sin tur kommer från databasen.
+/// Testerna för "Håll mig inloggad". De gör samma sak som kommandona
+/// `auth_login` med `remember`, `auth_restore_session` och `auth_logout`, fast
+/// utan gränssnitt: samma lagring, samma skyddade fil och samma kontroller.
+#[cfg(test)]
+mod login_tests {
+    use super::AppState;
+    use crate::auth::{create_user, login, reset_password, set_active};
+    use crate::openrouter::OpenRouterClient;
+    use crate::session;
+    use crate::storage::{Role, Storage};
+
+    /// En AppState för en mapp. Precis som i appen ligger den sparade sessionen
+    /// bredvid datamappen.
+    fn state_in(dir: &std::path::Path) -> AppState {
+        AppState {
+            storage: Storage::new(dir).expect("kunde inte skapa lagringen"),
+            client: OpenRouterClient::new(None).expect("kunde inte skapa klienten"),
+            models: tokio::sync::Mutex::new(None),
+            session: std::sync::Mutex::new(None),
+            session_dir: dir.to_path_buf(),
+            login_guard: crate::auth::LoginGuard::new(),
+        }
+    }
+
+    fn temp_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("lumi-login-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("kunde inte skapa testmappen");
+        dir
+    }
+
+    /// Inloggningen som `auth_login` gör den, inklusive valet att komma ihåg.
+    fn sign_in(
+        state: &AppState,
+        email: &str,
+        password: &str,
+        remember: bool,
+    ) -> Result<String, crate::error::AppError> {
+        let user = login(&state.storage, email, password)?;
+        let saved = if remember {
+            session::remember(&state.storage, &state.session_dir, &user.id)
+        } else {
+            session::clear(&state.session_dir)
+        };
+        saved?;
+        Ok(user.id)
+    }
+
+    #[test]
+    fn a_remembered_login_comes_back_after_a_restart() {
+        let dir = temp_dir();
+        let state = state_in(&dir);
+        let user = create_user(
+            &state.storage,
+            "elev@edu.ronneby.se",
+            "Hemligt12345",
+            "Elev",
+            Role::Student,
+        )
+        .unwrap();
+
+        let id = sign_in(&state, "elev@edu.ronneby.se", "Hemligt12345", true).unwrap();
+        assert_eq!(id, user.id);
+
+        // Ny AppState från samma mapp: appen har stängts och startats igen.
+        let restarted = state_in(&dir);
+        let restored = session::restore(&restarted.storage, &restarted.session_dir)
+            .unwrap()
+            .expect("den sparade sessionen borde gälla");
+        assert_eq!(restored.id, user.id);
+        assert_eq!(restored.role, Role::Student);
+        assert!(restored.active);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn without_the_check_nothing_is_remembered() {
+        let dir = temp_dir();
+        let state = state_in(&dir);
+        create_user(
+            &state.storage,
+            "elev@edu.ronneby.se",
+            "Hemligt12345",
+            "Elev",
+            Role::Student,
+        )
+        .unwrap();
+
+        sign_in(&state, "elev@edu.ronneby.se", "Hemligt12345", false).unwrap();
+
+        let restarted = state_in(&dir);
+        assert!(session::restore(&restarted.storage, &restarted.session_dir)
+            .unwrap()
+            .is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn logging_out_ends_the_saved_session() {
+        let dir = temp_dir();
+        let state = state_in(&dir);
+        create_user(
+            &state.storage,
+            "elev@edu.ronneby.se",
+            "Hemligt12345",
+            "Elev",
+            Role::Student,
+        )
+        .unwrap();
+
+        sign_in(&state, "elev@edu.ronneby.se", "Hemligt12345", true).unwrap();
+
+        // Samma som `auth_logout`: sessionen i minnet och den sparade filen.
+        session::clear(&state.session_dir).unwrap();
+
+        let restarted = state_in(&dir);
+        assert!(session::restore(&restarted.storage, &restarted.session_dir)
+            .unwrap()
+            .is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn two_accounts_never_share_a_restored_session() {
+        let dir = temp_dir();
+        let state = state_in(&dir);
+        let first = create_user(
+            &state.storage,
+            "elev@edu.ronneby.se",
+            "Hemligt12345",
+            "Elev",
+            Role::Student,
+        )
+        .unwrap();
+        let second = create_user(
+            &state.storage,
+            "larare@edu.ronneby.se",
+            "Hemligt12345",
+            "Lärare",
+            Role::Teacher,
+        )
+        .unwrap();
+
+        sign_in(&state, "elev@edu.ronneby.se", "Hemligt12345", true).unwrap();
+        // Den som loggar in sist med krysset är den som kommer tillbaka.
+        sign_in(&state, "larare@edu.ronneby.se", "Hemligt12345", true).unwrap();
+
+        let restarted = state_in(&dir);
+        let restored = session::restore(&restarted.storage, &restarted.session_dir)
+            .unwrap()
+            .expect("en session borde finnas");
+        assert_eq!(restored.id, second.id);
+        assert_ne!(restored.id, first.id);
+        assert!(restored.role.is_teacher());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_inactive_or_reset_account_cannot_come_back() {
+        let dir = temp_dir();
+        let state = state_in(&dir);
+        let user = create_user(
+            &state.storage,
+            "elev@edu.ronneby.se",
+            "Hemligt12345",
+            "Elev",
+            Role::Student,
+        )
+        .unwrap();
+
+        sign_in(&state, "elev@edu.ronneby.se", "Hemligt12345", true).unwrap();
+        reset_password(&state.storage, &user.id, "Annat123456").unwrap();
+
+        let restarted = state_in(&dir);
+        assert!(session::restore(&restarted.storage, &restarted.session_dir)
+            .unwrap()
+            .is_none());
+
+        // Och ett inaktiverat konto släpps inte in, även om filen finns kvar.
+        sign_in(&restarted, "elev@edu.ronneby.se", "Annat123456", true).unwrap();
+        set_active(&restarted.storage, &user.id, false).unwrap();
+
+        let again = state_in(&dir);
+        assert!(session::restore(&again.storage, &again.session_dir)
+            .unwrap()
+            .is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
 #[cfg(test)]
 mod gate_tests {
     use super::{
@@ -1997,6 +2240,8 @@ mod gate_tests {
             client: OpenRouterClient::new(None).expect("kunde inte skapa klienten"),
             models: tokio::sync::Mutex::new(None),
             session: std::sync::Mutex::new(None),
+            // I appen ligger den sparade sessionen bredvid datamappen.
+            session_dir: dir.clone(),
             login_guard: crate::auth::LoginGuard::new(),
         };
         (state, dir)

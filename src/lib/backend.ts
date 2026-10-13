@@ -7,6 +7,7 @@
 // läser som vanligt språk.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // ── Typer ─────────────────────────────────────────────────────────────────
 
@@ -549,9 +550,75 @@ export function listAttempts(accountId?: string): Promise<Attempt[]> {
 // hashade lösenord i användardatabasen. Sessionen ligger i backend, så inget
 // lösenord eller någon token sparas i gränssnittet.
 
-/** Loggar in och returnerar kontot. Kastar ett fel om uppgifterna är fel. */
-export function signIn(email: string, password: string): Promise<PublicUser> {
-  return call<PublicUser>("auth_login", { email, password });
+/**
+ * Loggar in och returnerar kontot. Kastar ett fel om uppgifterna är fel.
+ *
+ * `remember` motsvarar krysset "Håll mig inloggad": sessionen sparas då
+ * skyddad i backend, så att nästa start kan återställa den utan lösenord.
+ */
+export function signIn(
+  email: string,
+  password: string,
+  remember = false,
+): Promise<PublicUser> {
+  return call<PublicUser>("auth_login", { email, password, remember });
+}
+
+/**
+ * Återställer en sparad session vid start. Backend kontrollerar den mot
+ * databasen och svarar null om den inte längre gäller.
+ */
+export function restoreSession(): Promise<PublicUser | null> {
+  return call<PublicUser | null>("auth_restore_session");
+}
+
+// ── Uppdateringar ─────────────────────────────────────────────────────────
+
+/** En ny version finns och hämtas. */
+export interface UpdateAvailable {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+}
+
+/** Hur långt nedladdningen har kommit. */
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
+/** En uppdatering som inte gick att genomföra. Lumi kör vidare som förut. */
+export interface UpdateFailed {
+  version: string;
+  message: string;
+}
+
+/**
+ * Lyssnar på vad uppdateringsfunktionen gör. Backend hämtar och installerar
+ * en ny version vid start; det här är bara så att väntan syns.
+ *
+ * Returnerar en funktion som slutar lyssna.
+ */
+export async function onUpdateEvents(handlers: {
+  available?: (info: UpdateAvailable) => void;
+  progress?: (progress: UpdateProgress) => void;
+  failed?: (failure: UpdateFailed) => void;
+}): Promise<() => void> {
+  if (!runningInTauri) return () => {};
+
+  const stops = await Promise.all([
+    listen<UpdateAvailable>("lumi://update-available", (event) =>
+      handlers.available?.(event.payload),
+    ),
+    listen<UpdateProgress>("lumi://update-progress", (event) =>
+      handlers.progress?.(event.payload),
+    ),
+    listen<UpdateFailed>("lumi://update-failed", (event) =>
+      handlers.failed?.(event.payload),
+    ),
+  ]);
+
+  return () => stops.forEach((stop) => stop());
 }
 
 export function signOut(): Promise<void> {

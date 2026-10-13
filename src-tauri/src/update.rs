@@ -5,12 +5,17 @@
 //! privata nyckeln finns aldrig i appen, i repot eller på webbplatsen – den
 //! behövs bara när en release byggs.
 //!
-//! Den här delen laddar inte ner eller installerar något av sig själv. En
-//! installation görs först när gränssnittet ber om det, så att den som använder
-//! Lumi alltid vet att en uppdatering är på väg.
+//! En nyare version hämtas och installeras vid start, utan att någon behöver
+//! besöka webbplatsen eller köra en installationsfil själv. Signaturen måste
+//! stämma med den publika nyckeln i `tauri.conf.json` innan något installeras –
+//! gör den inte det avbryts uppdateringen och Lumi kör vidare som förut.
+//!
+//! Under en pågående session installeras inget. En omstart mitt i arbetet
+//! vore ett avbrott, så då kontrolleras bara läget och uppdateringen tas vid
+//! nästa start i stället.
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::error::AppError;
@@ -58,6 +63,104 @@ pub async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, AppError> {
 #[tauri::command]
 pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, AppError> {
     check(&app).await
+}
+
+// ── Nedladdning och installation ──────────────────────────────────────────
+
+/// Händelser som gränssnittet lyssnar på.
+pub const EVENT_AVAILABLE: &str = "lumi://update-available";
+pub const EVENT_PROGRESS: &str = "lumi://update-progress";
+pub const EVENT_FAILED: &str = "lumi://update-failed";
+
+/// Hur ofta en ny version letas efter när appen redan kör. Tätare än så
+/// behövs inte: en uppdatering som publiceras medan Lumi är öppen tas ändå
+/// vid nästa start.
+pub const CHECK_INTERVAL_HOURS: u64 = 6;
+
+/// Hur långt nedladdningen har kommit, till gränssnittet.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressReport {
+    pub downloaded: u64,
+    /// Total storlek om servern anger den, annars inget.
+    pub total: Option<u64>,
+}
+
+/// Ett misslyckande som gränssnittet kan visa utan att avbryta något.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedReport {
+    pub version: String,
+    pub message: String,
+}
+
+/// Hämtar och installerar en nyare version om det finns någon.
+///
+/// Signaturen kontrolleras av uppdateringsfunktionen mot den publika nyckeln
+/// innan filen godkänns, så en uppdatering som inte kan verifieras når aldrig
+/// fram till en installation. Misslyckas något – inget nät, manifestet går
+/// inte att läsa, signaturen stämmer inte eller installationen startar inte –
+/// returneras felet och Lumi fortsätter köra som det är.
+///
+/// Returnerar versionen som installerades. På Windows avslutas appen när
+/// installationsprogrammet har startat, och den nya versionen startas av
+/// installationsprogrammet.
+pub async fn check_and_install(app: &AppHandle) -> Result<Option<UpdateInfo>, AppError> {
+    let updater = app
+        .updater()
+        .map_err(|error| AppError::Update(error.to_string()))?;
+
+    let Some(update) = updater
+        .check()
+        .await
+        .map_err(|error| AppError::Update(error.to_string()))?
+    else {
+        return Ok(None);
+    };
+
+    let info = UpdateInfo {
+        version: update.version.clone(),
+        current_version: update.current_version.clone(),
+        notes: update.body.clone(),
+    };
+
+    // Gränssnittet får veta att en uppdatering är på väg, så att den korta
+    // väntan syns i stället för att se ut som en krasch.
+    let _ = app.emit(EVENT_AVAILABLE, &info);
+
+    let handle = app.clone();
+    let mut downloaded: u64 = 0;
+
+    let result = update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ = handle.emit(
+                    EVENT_PROGRESS,
+                    ProgressReport {
+                        downloaded,
+                        total: total.map(|value| value as u64),
+                    },
+                );
+            },
+            || {},
+        )
+        .await;
+
+    match result {
+        Ok(()) => Ok(Some(info)),
+        Err(error) => {
+            let message = error.to_string();
+            let _ = app.emit(
+                EVENT_FAILED,
+                FailedReport {
+                    version: info.version.clone(),
+                    message: message.clone(),
+                },
+            );
+            Err(AppError::Update(message))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -184,6 +287,63 @@ mod tests {
             signature.trusted_comment().contains(&format!("version:{version}")),
             "signaturens kommentar nämner inte versionen: {}",
             signature.trusted_comment()
+        );
+    }
+
+    /// Kontrollerar uppdateringsmanifestet som publiceras tillsammans med
+    /// installationsfilen. Manifestet är det appen frågar efter, så pekar det
+    /// på fel version, fel fil eller en signatur som inte hör ihop med filen
+    /// slutar uppdateringarna att fungera.
+    ///
+    /// Saknas manifestet hoppar testet över: det skrivs först när en release
+    /// förbereds, och en helt ny klon ska inte falla på det.
+    #[test]
+    #[ignore = "kräver ett förberett uppdateringsmanifest – kör med cargo test -- --ignored"]
+    fn the_update_manifest_points_at_the_released_installer() {
+        let config = config();
+        let version = config["version"].as_str().expect("versionen saknas");
+        let bundle = std::path::PathBuf::from("target/release/bundle/nsis");
+        let manifest_path = bundle.join("latest.json");
+
+        let Ok(raw) = std::fs::read_to_string(&manifest_path) else {
+            eprintln!("Hoppar över: {} finns inte – förbered releasen först.", manifest_path.display());
+            return;
+        };
+        let manifest: serde_json::Value =
+            serde_json::from_str(&raw).expect("manifestet gick inte att läsa som JSON");
+
+        // Rätt version, och samma som appen byggdes med.
+        assert_eq!(
+            manifest["version"].as_str(),
+            Some(version),
+            "manifestet pekar inte på den byggda versionen"
+        );
+
+        let platform = &manifest["platforms"]["windows-x86_64"];
+        let url = platform["url"].as_str().expect("nedladdningsadressen saknas");
+        assert!(
+            url.contains("github.com/appbuildersweden/Lumi/releases"),
+            "nedladdningen ska gå till releaseplatsen: {url}"
+        );
+        assert!(
+            url.ends_with("Lumi-setup.exe"),
+            "manifestet ska peka på installationsfilens fasta namn: {url}"
+        );
+        assert!(url.contains(version), "adressen nämner inte versionen: {url}");
+        assert!(url.starts_with("https://"), "adressen måste vara krypterad");
+
+        // Signaturen i manifestet måste vara signaturen för just den filen.
+        let signature = platform["signature"]
+            .as_str()
+            .expect("signaturen saknas i manifestet");
+        let installer_sig = std::fs::read_to_string(format!(
+            "target/release/bundle/nsis/Lumi_{version}_x64-setup.exe.sig"
+        ))
+        .unwrap_or_default();
+        assert_eq!(
+            signature.trim(),
+            installer_sig.trim(),
+            "signaturen i manifestet hör inte till den byggda installationsfilen"
         );
     }
 
