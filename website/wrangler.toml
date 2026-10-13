@@ -1,0 +1,14 @@
+# Cloudflare Pages – Lumis webbplats.
+#
+# Sidan är helt statisk: ingen databas, ingen inloggning och ingen serverkod.
+# Bygget sker lokalt med `npm run build` och läggs upp med
+# `npx wrangler pages deploy dist` (kräver inloggning, körs bara efter godkännande).
+#
+# Samma uppgifter anges i Cloudflare Pages-gränssnittet:
+#   Byggkommando:  npm run build
+#   Utmapp:        dist
+#   Rotmapp:       website
+
+name = "lumi-webbplats"
+compatibility_date = "2026-10-13"
+pages_build_output_dir = "./dist"

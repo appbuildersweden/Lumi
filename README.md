@@ -188,6 +188,25 @@ src-tauri/src/
   error.rs                fel som skickas till gränssnittet
 ```
 
+## Webbplatsen
+
+Lumis webbplats ligger i `website/` som ett eget Vite-projekt, skilt från
+appen. Den innehåller startsida, funktioner, så fungerar Lumi, nedladdning och
+om Lumi – ingen inloggning, databas eller AI.
+
+```bash
+cd website
+npm install
+npm run dev      # utvecklingsserver
+npm run build    # typkontroll + statiskt bygge i website/dist
+```
+
+Installationsfilen finns inte ännu, så nedladdningsknappen visar **Kommer
+snart**. När filen finns räcker det att fylla i `DOWNLOAD` i
+`website/src/content.ts`. Bygget är förberett för Cloudflare Pages
+(`website/wrangler.toml` och `website/public/_headers`), men **inget är
+publicerat eller uppladdat**. Mer i [website/README.md](website/README.md).
+
 ## Vad som väntar
 
 Adminpanelens sidopanel har sju poster: **Startsida**, **Elever**, **Personal**,

@@ -1,0 +1,1114 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Lumi · webbplats
+   Samma identitet som skrivbordsappen: rosé, plum och vitt, samma typsnitt,
+   rundade kort och mjuka skuggor. Sidan byggs som statiska filer och skalas
+   från mobil till stor skärm.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Rosé – samma stegar som i appen */
+  --rose-050: #fdf4f7;
+  --rose-100: #fbe7ee;
+  --rose-200: #f7d3de;
+  --rose-300: #f0b3c6;
+  --rose-400: #e594ad;
+  --rose-500: #d97c99;
+  --rose-600: #c56982;
+  --rose-700: #a8526b;
+
+  /* Plum och lila */
+  --plum-900: #4a2130;
+  --plum-700: #6b3a4c;
+  --violet-700: #6d3b7f;
+  --violet-800: #552e63;
+  --lavender-050: #f8f4fb;
+
+  /* Text */
+  --ink-title: #3b2a33;
+  --ink-900: #2e2a2c;
+  --ink-600: #6f666b;
+
+  /* Ytor, linjer och skuggor */
+  --white: #ffffff;
+  --surface: #fdfafb;
+  --hairline: rgba(197, 105, 130, 0.22);
+  --hairline-strong: rgba(197, 105, 130, 0.42);
+  --shadow-sm: 0 1px 2px rgba(74, 33, 48, 0.05), 0 8px 20px rgba(74, 33, 48, 0.07);
+  --shadow-md: 0 2px 6px rgba(74, 33, 48, 0.07), 0 18px 40px rgba(74, 33, 48, 0.11);
+  --shadow-lg: 0 28px 64px rgba(74, 33, 48, 0.18);
+
+  /* Gradienter */
+  --gradient-brand: linear-gradient(135deg, #b25c78 0%, #6d3b7f 100%);
+  --gradient-brand-soft: linear-gradient(135deg, rgba(178, 92, 120, 0.16), rgba(109, 59, 127, 0.16));
+
+  /* Mått */
+  --shell: 1140px;
+  --radius-card: 20px;
+  --radius-pill: 999px;
+  --header-height: 72px;
+
+  --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", "Segoe UI", system-ui,
+    -apple-system, sans-serif;
+
+  color-scheme: light;
+  scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--header-height) + 16px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--ink-900);
+  background: var(--surface);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--ink-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--rose-700);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+button {
+  font-family: inherit;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+:focus-visible {
+  outline: 3px solid var(--violet-700);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: var(--rose-200);
+  color: var(--plum-900);
+}
+
+/* ── Hjälpklasser ─────────────────────────────────────────────────────── */
+
+.shell {
+  width: 100%;
+  max-width: var(--shell);
+  margin: 0 auto;
+  padding: 0 clamp(20px, 5vw, 40px);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  z-index: 100;
+  padding: 10px 18px;
+  border-radius: var(--radius-pill);
+  background: var(--plum-900);
+  color: var(--white);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translate(-50%, -150%);
+  transition: transform 180ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translate(-50%, 0);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rose-700);
+}
+
+.eyebrow--on-dark {
+  color: var(--rose-200);
+}
+
+/* ── Knappar ──────────────────────────────────────────────────────────── */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 24px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 170ms ease, box-shadow 200ms ease, background-color 200ms ease,
+    border-color 200ms ease, color 200ms ease;
+}
+
+.button--primary {
+  background-image: var(--gradient-brand);
+  color: var(--white);
+  box-shadow: 0 10px 24px rgba(109, 59, 127, 0.28);
+}
+
+.button--primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px rgba(109, 59, 127, 0.34);
+}
+
+.button--ghost {
+  background-color: rgba(255, 255, 255, 0.78);
+  border-color: var(--hairline-strong);
+  color: var(--plum-900);
+  backdrop-filter: blur(6px);
+}
+
+.button--ghost:hover {
+  background-color: var(--white);
+  border-color: var(--rose-400);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.button--light {
+  background-color: var(--white);
+  color: var(--plum-900);
+  box-shadow: 0 12px 28px rgba(20, 8, 24, 0.28);
+}
+
+.button--light:hover {
+  transform: translateY(-2px);
+}
+
+.button--disabled {
+  /* Tydligt läsbar, men markerat inaktiv: streckad ram och en pil som inte
+     går att trycka på. Ingen falsk nedladdningslänk någonstans. */
+  background-color: rgba(255, 255, 255, 0.92);
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.7);
+  color: var(--plum-900);
+  cursor: not-allowed;
+}
+
+.button--small {
+  padding: 10px 18px;
+  font-size: 14.5px;
+}
+
+.button--large {
+  padding: 16px 30px;
+  font-size: 16.5px;
+}
+
+/* ── Logotyp ──────────────────────────────────────────────────────────── */
+
+/* Bilden på webbplatsen är appens logotyp nedskalad till en fjärdedel
+   (384×256 i stället för 1536×1024). Måtten nedan är i skärmpixlar och därför
+   desamma som i appen: de beskriver hur mycket bilden skalas och förskjuts,
+   inte hur stor filen är. */
+.logo {
+  display: block;
+  background-image: url("/lumi-logo.png");
+  background-repeat: no-repeat;
+}
+
+.logo--header {
+  width: 97px;
+  height: 34px;
+  background-size: 109.8px auto;
+  background-position: -6.12px -19.15px;
+}
+
+.logo--footer {
+  width: 85px;
+  height: 30px;
+  background-size: 96.2px auto;
+  background-position: -5.4px -16.9px;
+}
+
+.logo--mock {
+  width: 8.9em;
+  height: 3.1em;
+  background-size: 9.98em auto;
+  background-position: -0.56em -1.74em;
+}
+
+/* ── Toppmeny ─────────────────────────────────────────────────────────── */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background-color: rgba(253, 250, 251, 0.86);
+  backdrop-filter: blur(16px) saturate(140%);
+  border-bottom: 1px solid transparent;
+  transition: border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.site-header.is-scrolled {
+  border-bottom-color: var(--hairline);
+  box-shadow: 0 10px 30px rgba(74, 33, 48, 0.07);
+}
+
+.site-header__inner {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-height: var(--header-height);
+}
+
+.site-header__brand {
+  display: flex;
+  align-items: center;
+  margin-right: auto;
+  text-decoration: none;
+}
+
+.site-nav__list {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-nav__link {
+  display: inline-block;
+  padding: 9px 15px;
+  border-radius: var(--radius-pill);
+  color: var(--plum-900);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 170ms ease, color 170ms ease;
+}
+
+.site-nav__link:hover {
+  background-color: rgba(240, 179, 198, 0.3);
+  color: var(--plum-900);
+}
+
+.site-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.site-header__toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 13px;
+  background-color: rgba(255, 255, 255, 0.8);
+  color: var(--plum-900);
+  cursor: pointer;
+}
+
+.site-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  padding: 8px clamp(20px, 5vw, 40px) 22px;
+  /* Helt tät yta: menyn ska alltid vara lätt att läsa, oavsett vad som
+     ligger bakom den. */
+  background-color: var(--white);
+  border-bottom: 1px solid var(--hairline);
+  box-shadow: var(--shadow-md);
+  animation: menu-in 200ms ease;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.site-menu__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.site-menu__link {
+  display: block;
+  padding: 13px 10px;
+  border-radius: 12px;
+  color: var(--plum-900);
+  font-size: 16.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.site-menu__link:hover {
+  background-color: var(--rose-050);
+}
+
+.site-menu__cta {
+  width: 100%;
+}
+
+/* ── Startsidans topp ─────────────────────────────────────────────────── */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(36px, 5.5vw, 72px) 0 clamp(56px, 7vw, 96px);
+  background: linear-gradient(180deg, var(--white) 0%, var(--rose-050) 58%, var(--white) 100%);
+}
+
+.hero__wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 44% at 6% 4%, rgba(240, 179, 198, 0.5), rgba(240, 179, 198, 0) 70%),
+    radial-gradient(32% 38% at 97% 8%, rgba(109, 59, 127, 0.18), rgba(109, 59, 127, 0) 72%),
+    radial-gradient(52% 40% at 52% 106%, rgba(229, 148, 173, 0.24), rgba(229, 148, 173, 0) 70%);
+}
+
+.hero__inner {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(32px, 5vw, 62px);
+}
+
+.hero__title {
+  margin: 14px 0 0;
+  font-size: clamp(2.1rem, 4.5vw, 3.4rem);
+  font-weight: 800;
+  line-height: 1.07;
+  letter-spacing: -0.032em;
+}
+
+.hero__accent {
+  color: var(--rose-700);
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .hero__accent {
+    background-image: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+.hero__lead {
+  margin: 20px 0 0;
+  max-width: 34rem;
+  font-size: clamp(1rem, 1.3vw, 1.14rem);
+  line-height: 1.65;
+  color: var(--ink-600);
+}
+
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 30px;
+}
+
+.hero__note {
+  margin-top: 16px;
+  font-size: 13.5px;
+  color: var(--ink-600);
+}
+
+.hero__preview {
+  margin: 0;
+}
+
+.hero__caption {
+  margin-top: 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-600);
+}
+
+/* ── Den ritade förhandsvisningen ─────────────────────────────────────── */
+
+.mock {
+  width: 100%;
+}
+
+.mock__window {
+  /* Förhandsvisningen är en illustration och läses därför inte upp av
+     skärmläsare – bildtexten under figuren beskriver den. */
+  /* Reserv för webbläsare utan container queries: fast basstorlek. */
+  font-size: 10px;
+  display: grid;
+  grid-template-columns: 0.46fr 1fr;
+  min-height: 33em;
+  border: 0.09em solid rgba(255, 255, 255, 0.9);
+  border-radius: 1.7em;
+  background-color: var(--white);
+  box-shadow: var(--shadow-lg), 0 0 0 0.09em rgba(197, 105, 130, 0.2);
+  overflow: hidden;
+}
+
+@supports (container-type: inline-size) {
+  .mock {
+    container-type: inline-size;
+  }
+
+  .mock__window {
+    font-size: clamp(7.6px, 2.4cqw, 12.6px);
+  }
+}
+
+.mock__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2em;
+  padding: 1.3em 1.1em 1.4em;
+  color: var(--plum-900);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.72) 0%,
+    rgba(247, 211, 222, 0.85) 60%,
+    rgba(251, 231, 238, 0.9) 100%
+  );
+  border-right: 0.08em solid rgba(255, 255, 255, 0.7);
+}
+
+.mock__brand {
+  padding: 0 0.4em 0.3em;
+}
+
+.mock__menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mock__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.85em;
+  padding: 0.62em 0.85em;
+  border: 0.09em solid transparent;
+  border-radius: 0.95em;
+  font-size: 1em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mock__menu-item.is-active {
+  background-color: rgba(255, 255, 255, 0.72);
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0.3em 0.9em rgba(74, 33, 48, 0.07);
+}
+
+.mock__menu-item--profile {
+  margin-top: auto;
+}
+
+.mock__main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15em;
+  padding: 1.4em 1.5em 1.6em;
+  background-color: var(--white);
+}
+
+.mock__banner {
+  padding: 1.5em 1.4em;
+  border-radius: 1.15em;
+  background: linear-gradient(118deg, #f7d3de 0%, #fbe7ee 58%, #f1e6f6 100%);
+}
+
+.mock__greeting {
+  margin: 0;
+  font-size: 1.5em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--plum-900);
+}
+
+.mock__greeting-sub {
+  margin: 0.3em 0 0;
+  font-size: 1em;
+  color: var(--plum-700);
+}
+
+.mock__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9em;
+}
+
+.mock__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  padding: 1em 1.1em;
+  border: 0.09em solid var(--hairline);
+  border-radius: 1.05em;
+  background-color: var(--white);
+}
+
+.mock__stat-label {
+  font-size: 0.85em;
+  line-height: 1.3;
+  color: var(--ink-600);
+}
+
+.mock__stat-value {
+  font-size: 1.35em;
+  font-weight: 700;
+  color: var(--plum-900);
+}
+
+.mock__heading {
+  margin: 0.2em 0 0;
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rose-700);
+}
+
+.mock__materials {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mock__material {
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+  padding: 0.8em 0.95em;
+  border: 0.09em solid var(--hairline);
+  border-radius: 1.05em;
+  background-color: var(--white);
+}
+
+.mock__chip {
+  flex: none;
+  padding: 0.35em 0.8em;
+  border-radius: 999px;
+  background-color: var(--rose-100);
+  color: var(--rose-700);
+  font-size: 0.82em;
+  font-weight: 600;
+}
+
+.mock__material-text {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.9em;
+  color: var(--ink-600);
+}
+
+.mock__material-text strong {
+  font-size: 1.05em;
+  color: var(--plum-900);
+}
+
+/* ── Avsnitt ──────────────────────────────────────────────────────────── */
+
+.section {
+  padding: clamp(56px, 7.5vw, 104px) 0;
+}
+
+.section__head {
+  max-width: 46rem;
+  margin: 0 auto clamp(34px, 4.4vw, 52px);
+  text-align: center;
+}
+
+.section__title {
+  margin: 12px 0 0;
+  font-size: clamp(1.6rem, 3vw, 2.35rem);
+  font-weight: 800;
+  letter-spacing: -0.028em;
+  line-height: 1.15;
+}
+
+.section__lead {
+  margin: 14px auto 0;
+  max-width: 38rem;
+  font-size: 1.05rem;
+  color: var(--ink-600);
+}
+
+.section__note {
+  margin: clamp(26px, 3.4vw, 40px) auto 0;
+  max-width: 44rem;
+  text-align: center;
+  font-size: 14px;
+  color: var(--ink-600);
+}
+
+/* ── Funktioner ───────────────────────────────────────────────────────── */
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  gap: 20px;
+}
+
+.feature {
+  display: flex;
+  flex-direction: column;
+  padding: 26px 24px 28px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background-color: var(--white);
+  box-shadow: var(--shadow-sm);
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.feature:hover {
+  transform: translateY(-4px);
+  border-color: var(--hairline-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.feature__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(197, 105, 130, 0.24);
+  border-radius: 14px;
+  background-image: var(--gradient-brand-soft);
+  color: var(--violet-700);
+}
+
+.feature__title {
+  margin: 0 0 8px;
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--plum-900);
+}
+
+.feature__text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.62;
+  color: var(--ink-600);
+}
+
+/* ── Så fungerar Lumi ─────────────────────────────────────────────────── */
+
+.section--steps {
+  background: linear-gradient(180deg, var(--white) 0%, var(--lavender-050) 42%, var(--white) 100%);
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  padding: 26px 24px 28px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background-color: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+
+.step__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background-image: var(--gradient-brand);
+  color: var(--white);
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(109, 59, 127, 0.24);
+}
+
+.step__title {
+  margin: 0 0 8px;
+  font-size: 1.06rem;
+  font-weight: 700;
+  color: var(--plum-900);
+}
+
+.step__text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.62;
+  color: var(--ink-600);
+}
+
+/* ── Nedladdning ──────────────────────────────────────────────────────── */
+
+.download {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(26px, 3.6vw, 46px);
+  padding: clamp(30px, 4.4vw, 52px);
+  border-radius: 26px;
+  background-image: linear-gradient(135deg, #552e63 0%, #7a3f56 58%, #a8526b 100%);
+  color: var(--white);
+  box-shadow: 0 26px 60px rgba(74, 33, 48, 0.26);
+  overflow: hidden;
+}
+
+.download::after {
+  content: "";
+  position: absolute;
+  right: -14%;
+  bottom: -46%;
+  width: 46%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 32%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 70%);
+  pointer-events: none;
+}
+
+.download__copy,
+.download__action {
+  position: relative;
+  z-index: 1;
+}
+
+.download__title {
+  margin: 12px 0 12px;
+  font-size: clamp(1.6rem, 2.9vw, 2.3rem);
+  font-weight: 800;
+  letter-spacing: -0.026em;
+  line-height: 1.14;
+  color: var(--white);
+}
+
+.download__lead {
+  max-width: 40rem;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.download__version {
+  margin-top: 12px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.download__action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.download__note {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.download__details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 26px;
+  margin-top: 28px;
+}
+
+.download__detail-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--plum-900);
+}
+
+.download__list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ink-600);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+/* ── Om Lumi ──────────────────────────────────────────────────────────── */
+
+.section--about {
+  background: linear-gradient(180deg, var(--white) 0%, var(--rose-050) 100%);
+}
+
+.about {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(30px, 4.6vw, 62px);
+}
+
+.about__text {
+  margin-top: 16px;
+  font-size: 1rem;
+  line-height: 1.72;
+  color: var(--ink-600);
+}
+
+.about__points {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.about__point {
+  display: flex;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background-color: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+
+.about__point-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background-image: var(--gradient-brand-soft);
+  color: var(--violet-700);
+}
+
+.about__point-title {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--plum-900);
+}
+
+.about__point-text {
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.62;
+  color: var(--ink-600);
+}
+
+/* ── Sidfot ───────────────────────────────────────────────────────────── */
+
+.site-footer {
+  border-top: 1px solid var(--hairline);
+  background: linear-gradient(180deg, var(--white) 0%, var(--rose-050) 100%);
+  padding: clamp(44px, 6vw, 72px) 0 24px;
+  color: var(--ink-600);
+}
+
+.site-footer__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+}
+
+.site-footer__tagline {
+  margin-top: 14px;
+  max-width: 24rem;
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.site-footer__download {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: var(--rose-700);
+}
+
+.site-footer__heading {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--plum-900);
+}
+
+.site-footer__list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-footer__link {
+  color: var(--ink-600);
+  font-size: 0.94rem;
+  text-decoration: none;
+}
+
+.site-footer__link:hover {
+  color: var(--rose-700);
+  text-decoration: underline;
+}
+
+.site-footer__text {
+  max-width: 22rem;
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.site-footer__bottom {
+  margin-top: clamp(30px, 4vw, 44px);
+  padding-top: 18px;
+  border-top: 1px solid var(--hairline);
+  font-size: 0.85rem;
+  color: var(--ink-600);
+}
+
+/* ── In-toning vid skroll ─────────────────────────────────────────────── */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 620ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 620ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.reveal[data-revealed="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── Mindre skärmar ───────────────────────────────────────────────────── */
+
+@media (max-width: 1000px) {
+  .hero__inner,
+  .about {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero__preview {
+    order: 2;
+  }
+
+  .download {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .site-nav,
+  .site-header__cta {
+    display: none;
+  }
+
+  .site-header__toggle {
+    display: inline-flex;
+  }
+
+  .site-footer__inner {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .site-footer__brand {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .hero__actions .button {
+    width: 100%;
+  }
+
+  .download__action {
+    align-items: stretch;
+  }
+
+  .site-footer__inner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── Mindre rörelse ───────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    scroll-behavior: auto;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

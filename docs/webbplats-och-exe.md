@@ -3,9 +3,11 @@
 Det här dokumentet beskriver vad som redan går att återanvända och vad som måste
 bestämmas innan Lumi finns som webbplats eller som färdig Windows-app.
 
-**Inget i det här dokumentet är byggt.** Ingen webbplats är publicerad, ingen
-extern tjänst är inkopplad och ingen `.exe` är skapad. Lagring och inloggning
-ligger kvar precis som de är tills en migreringsplan har godkänts.
+**Ingen webbplats är publicerad och ingen `.exe` är skapad.** Webbplatsen i
+[website/](../website/README.md) är byggd som ett eget Vite-projekt och går att
+köra lokalt, men den är inte uppladdad och innehåller varken inloggning, databas
+eller AI. Ingen extern tjänst är inkopplad. Lagring och inloggning i appen ligger
+kvar precis som de är tills en migreringsplan har godkänts.
 
 ## 1. Det som kan återanvändas rakt av
 
@@ -104,10 +106,16 @@ kopplas separat, och inget av dem är valt här.
 
 Det som kräver anpassning om vi väljer Pages:
 
-- SPA-fallback: alla rutter måste falla tillbaka på `index.html`.
+- SPA-fallback: alla rutter måste falla tillbaka på `index.html`. (Den nya
+  landningssidan har inga klientsidor och behöver därför ingen sådan regel.)
 - API-bas-URL i produktion, och en CSP som passar appen.
 - Sessionscookies över domänen, samt regler för vilka anrop som får komma från varifrån.
 - Bygget får inte innehålla några hemligheter; nycklar ska ligga i servermiljön.
+
+Den första versionen av webbplatsen är förberedd för Pages: `website/wrangler.toml`
+anger byggkommando och utmapp, `website/public/_headers` sätter säkerhetsrubriker
+och cachning, och bygget är helt statiskt. Att lägga upp den kräver en inloggning
+till Cloudflare och ett godkännande – inget är uppladdat.
 
 ## 7. Beslut som måste fattas innan en gemensam databas eller inloggning
 
