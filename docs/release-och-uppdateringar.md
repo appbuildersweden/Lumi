@@ -3,11 +3,18 @@
 Det här dokumentet beskriver hur en Windows-installation byggs, hur den
 publiceras och hur versionskontrollen i appen fungerar.
 
-**Version 0.1.0 är publicerad.** Releasen ligger på
-<https://github.com/appbuildersweden/Lumi/releases/tag/v0.1.0>,
+**Version 0.1.1 är publicerad.** Releasen ligger på
+<https://github.com/appbuildersweden/Lumi/releases/tag/v0.1.1>,
 installationsfilen går att hämta från
 <https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe>
-och nedladdningsknappen på webbplatsen är aktiv.
+och nedladdningsknappen på webbplatsen är aktiv. Version 0.1.0 ligger kvar
+oförändrad på sin egen adress.
+
+**Den som har 0.1.0 installerad får uppdateringen först vid en manuell
+installation av 0.1.1.** 0.1.0 kan bara *upptäcka* en ny version – den skriver
+en rad i terminalen men saknar kod för att hämta och installera. Den automatiska
+installationen börjar gälla från 0.1.1 och framåt, så nästa release (0.1.2) är
+den första som en installerad Lumi hämtar helt själv.
 
 ## 1. Vad som byggs
 
@@ -163,10 +170,36 @@ uppdateringen och Lumi kör vidare precis som förut. Felet skrivs i terminalen 
 skickas till gränssnittet; det finns ingen väg där en overifierad fil installeras.
 Nästa start gör ett nytt försök.
 
-Den här delen av installationen kan bara testas mot en riktig release, eftersom
-manifest och signatur kommer från GitHub. `cargo test -- --ignored` verifierar
-signaturen i manifestet mot installationsfilens `.sig` och mot den publika
-nyckeln i konfigurationen – samma kontroll som appen gör.
+### Så verifieras kedjan
+
+`cargo test -- --ignored` kontrollerar att signaturen i `latest.json` hör till
+den byggda installationsfilen och att den verifierar mot den publika nyckeln i
+konfigurationen. Det är samma kontroll appen gör, men den säger inget om att
+nedladdning och installation faktiskt fungerar. För det behövs ett test där en
+*äldre* version möter ett manifest för en nyare:
+
+1. Bygg en testvariant av samma kod med en lägre version och en lokal adress:
+   `npm run tauri build -- --no-bundle --config '{"version":"0.1.0",
+   "bundle":{"createUpdaterArtifacts":false},"plugins":{"updater":
+   {"endpoints":["http://127.0.0.1:8765/latest.json"],
+   "dangerousInsecureTransportProtocol":true}}}'`.
+2. Servera det riktiga `latest.json` (med `url` ändrad till den lokala adressen)
+   och en kopia av den byggda installationsfilen på `127.0.0.1:8765`.
+3. Starta testvarianten och följ den: versionen ska bytas i
+   `%LOCALAPPDATA%\Lumi` och avinstallationsposten i registret likaså. Att
+   installationsprogrammet startar om Lumi syns som att en process från den
+   installerade sökvägen tar över.
+4. Upprepa med en medvetet trasig signatur i manifestet. Då ska inget
+   installeras, versionen vara oförändrad och raden *The signature verification
+   failed* synas – filen får aldrig nå installationen.
+5. Till sist: låt testvarianten hämta **den publicerade** filen från GitHub
+   (`url` i manifestet pekar på `releases/download/v0.1.1/Lumi-setup.exe`). Det
+   bevisar att släppets egna filer går att verifiera och installera, inte bara de
+   lokalt byggda.
+
+`dangerousInsecureTransportProtocol` och den lokala adressen är bara för det
+här testet och får aldrig finnas i `tauri.conf.json` – den riktiga
+konfigurationen använder enbart `https` mot GitHub.
 
 ## 6. Nedladdningsknappen på webbplatsen
 
@@ -176,7 +209,7 @@ I `website/src/content.ts`:
 export const DOWNLOAD: DownloadInfo = {
   available: true,    // false tills releasen finns
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
-  version: "0.1.0",   // fylls i vid publicering
+  version: "0.1.1",   // fylls i vid publicering
   requirements: ["Windows 10 eller 11 (64-bitars)"],
   steps: ["Hämta filen", "Kör installationsprogrammet", "Starta Lumi"],
 };
@@ -185,3 +218,13 @@ export const DOWNLOAD: DownloadInfo = {
 Adressen är den samma för varje version, eftersom kopian heter `Lumi-setup.exe`.
 Så länge `available` är `false` visar knappen *Kommer snart* och ingen länk
 skapas.
+
+Versionsnumret i filen syns som *Version X* ovanför knappen. **Efter varje
+versionshöjning måste webbplatsen byggas och laddas upp igen**, annars pekar
+knappen visserligen på rätt fil men sidan visar det gamla numret:
+
+```bash
+cd website && npm run build && npx wrangler pages deploy dist
+```
+
+Sidan ligger på <https://lumi-webbplats.pages.dev>.
