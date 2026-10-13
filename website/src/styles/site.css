@@ -487,7 +487,10 @@ img {
   /* Reserv för webbläsare utan container queries: fast basstorlek. */
   font-size: 10px;
   display: grid;
-  grid-template-columns: 0.46fr 1fr;
+  /* minmax(0, …) låter kolumnerna krympa under sitt innehåll. Utan det tvingar
+     menytexten fram en minsta bredd och hela förhandsvisningen blir bredare
+     än skärmen på mycket smala skärmar. */
+  grid-template-columns: minmax(0, 0.46fr) minmax(0, 1fr);
   min-height: 33em;
   border: 0.09em solid rgba(255, 255, 255, 0.9);
   border-radius: 1.7em;
@@ -509,6 +512,8 @@ img {
 .mock__sidebar {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
   gap: 1.2em;
   padding: 1.3em 1.1em 1.4em;
   color: var(--plum-900);
@@ -559,6 +564,8 @@ img {
 .mock__main {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
   gap: 1.15em;
   padding: 1.4em 1.5em 1.6em;
   background-color: var(--white);
@@ -701,7 +708,9 @@ img {
 
 .features {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  /* min(100%, …) gör att korten kan krympa i stället för att tvinga fram
+     vågrät skroll på mycket smala skärmar. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 232px), 1fr));
   gap: 20px;
 }
 
@@ -758,7 +767,7 @@ img {
 
 .steps {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 22px;
   margin: 0;
   padding: 0;
@@ -873,7 +882,7 @@ img {
 
 .download__details {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 26px;
   margin-top: 28px;
 }
