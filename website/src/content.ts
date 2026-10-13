@@ -80,16 +80,14 @@ export const STEPS: Step[] = [
 ];
 
 /**
- * Nedladdningen. Installationsfilen finns inte ännu, och därför visas inga
- * uppgifter om version, systemkrav eller installationssteg i gränssnittet.
+ * Nedladdningen. Version 0.1.0 är publicerad och knappen är aktiv.
  *
- * Adressen nedan är den som gäller när releasen finns: filen heter alltid
- * `Lumi-setup.exe` i den senaste releasen, så samma länk fungerar för varje
- * version. Så länge `available` är false skapas ingen länk – knappen visar
- * "Kommer snart". Vid publicering: sätt `available` till true och fyll i
- * version, systemkrav och installationssteg.
+ * Adressen är den fasta adressen till senaste releasen: filen heter alltid
+ * `Lumi-setup.exe` där, så samma länk fungerar för varje version utan ändring.
+ * Så länge `available` är false skapas ingen länk – knappen visar
+ * "Kommer snart" i stället för en adress som inte leder någonstans.
  *
- * Stegen finns i docs/release-och-uppdateringar.md.
+ * Hur en ny version publiceras finns i docs/release-och-uppdateringar.md.
  */
 export interface DownloadInfo {
   available: boolean;
@@ -100,17 +98,24 @@ export interface DownloadInfo {
 }
 
 export const DOWNLOAD: DownloadInfo = {
-  available: false,
+  available: true,
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
-  version: "",
-  requirements: [],
-  steps: [],
+  version: "0.1.0",
+  requirements: [
+    "Windows 10 eller 11 (64-bitars)",
+    "Ingen administratörsbehörighet behövs – Lumi installeras för din egen användare",
+  ],
+  steps: [
+    "Hämta installationsfilen",
+    "Kör filen. Visar Windows en varning eftersom filen inte är signerad med ett kodsigneringscertifikat, välj Mer information och Kör ändå.",
+    "Starta Lumi och logga in med kontot du har fått av skolan",
+  ],
 };
 
 export const DOWNLOAD_TITLE = "Ladda ner Lumi för Windows";
 
 export const DOWNLOAD_TEXT =
-  "Lumi installeras på din Windows-dator. Installationsfilen är inte publicerad ännu, så knappen visar Kommer snart tills den finns att hämta.";
+  "Lumi installeras på din Windows-dator och frågar aldrig om administratörsbehörighet. Hämta filen och kör den – sedan är appen redo att använda.";
 
 /** Texten som visas i stället för knappen så länge filen saknas. */
 export const DOWNLOAD_PENDING_NOTE =

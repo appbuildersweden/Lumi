@@ -3,9 +3,11 @@
 Det här dokumentet beskriver hur en Windows-installation byggs, hur den
 publiceras och hur versionskontrollen i appen fungerar.
 
-**Inget är publicerat.** Ingen release finns på GitHub, ingen installationsfil
-ligger ute och nedladdningsknappen på webbplatsen visar fortfarande
-*Kommer snart*.
+**Version 0.1.0 är publicerad.** Releasen ligger på
+<https://github.com/appbuildersweden/Lumi/releases/tag/v0.1.0>,
+installationsfilen går att hämta från
+<https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe>
+och nedladdningsknappen på webbplatsen är aktiv.
 
 ## 1. Vad som byggs
 
@@ -135,7 +137,7 @@ I `website/src/content.ts`:
 
 ```ts
 export const DOWNLOAD: DownloadInfo = {
-  available: false,   // sätts till true när releasen finns
+  available: true,    // false tills releasen finns
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
   version: "0.1.0",   // fylls i vid publicering
   requirements: ["Windows 10 eller 11 (64-bitars)"],
