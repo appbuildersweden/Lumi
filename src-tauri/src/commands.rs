@@ -16,10 +16,10 @@ use crate::chat;
 use crate::config::{self, ModelRole};
 use crate::error::AppError;
 use crate::materials::{self, GenerateRequest};
-use crate::openrouter::{ChatMessage, ChatUsage, KeyStatus, ModelInfo, OpenRouterClient};
+use crate::openrouter::{ChatMessage, ChatUsage, ModelInfo, OpenRouterClient, ServiceStatus};
 use crate::session;
 use crate::storage::{
-    now_ms, ActivityEntry, AdminMessage, Assignment, Attempt, Exam, ExamResult, Person,
+    now_ms, ActivityEntry, AdminMessage, Assignment, Attempt, Exam, ExamResult, Person, Role,
     ScheduleEntry, Settings, Storage, StudyMaterial, Submission,
 };
 
@@ -1251,6 +1251,28 @@ pub fn list_admin_messages(state: State<'_, AppState>) -> Result<Vec<AdminMessag
     state.storage.admin_messages()
 }
 
+/// Nyheterna som en roll får läsa. Regeln ligger utanför kommandot så att den
+/// går att köra i test utan att starta ett appfönster.
+fn messages_for_role(state: &AppState, role: Role) -> Result<Vec<AdminMessage>, AppError> {
+    Ok(state
+        .storage
+        .admin_messages()?
+        .into_iter()
+        .filter(|message| message.visible_to(role))
+        .collect())
+}
+
+/// Nyheterna och meddelandena som den inloggade får läsa.
+///
+/// Elev och lärare använder den här vägen i stället för adminlistan. Rollen
+/// läses ur databasen vid varje anrop och avgör vad som skickas tillbaka –
+/// gränssnittet kan inte välja bort filtret, och en gäst får ingenting alls.
+#[tauri::command]
+pub fn my_admin_messages(state: State<'_, AppState>) -> Result<Vec<AdminMessage>, AppError> {
+    let viewer = require_session(&state)?;
+    messages_for_role(&state, viewer.role)
+}
+
 #[tauri::command]
 pub fn save_admin_message(
     state: State<'_, AppState>,
@@ -1313,26 +1335,44 @@ pub fn list_activity(
 }
 
 // ---------------------------------------------------------------------------
-// API-nyckeln
+// AI-tjänsten
 // ---------------------------------------------------------------------------
 
-/// Nyckeln läses uteslutande från miljövariabeln `OPENROUTER_API_KEY`, som i
-/// utvecklingsläge kan komma från `.env`.
+/// Tjänstens adress och markeringen som visar att anropet kommer från Lumi.
 ///
-/// Den sparas aldrig i en användarprofil, efterfrågas aldrig i gränssnittet och
-/// skrivs aldrig till en fil i projektet – och följer därför inte med i en
-/// byggd .exe. En nyckel som ligger i en miljövariabel är ändå inte ett
-/// fullständigt skydd när appen distribueras; då behövs en separat tjänst som
-/// håller nyckeln utanför datorn. Det är nästa steg, inte något som löstes här.
-pub fn resolve_api_key() -> (Option<String>, &'static str) {
-    match std::env::var(config::API_KEY_ENV) {
-        Ok(value) if !value.trim().is_empty() => (Some(value.trim().to_string()), "environment"),
-        _ => (None, "none"),
+/// Normalt kommer båda från den byggda appen. Miljövariablerna `LUMI_AI_URL`
+/// och `LUMI_AI_TOKEN` får bara användas under utveckling, mot en lokal tjänst.
+///
+/// Här finns ingen OpenRouter-nyckel: den ligger som en hemlighet hos tjänsten
+/// och kan därför varken läsas ur appen eller ur en installationsfil.
+pub fn gateway_config() -> (String, String, &'static str) {
+    let url = std::env::var(config::GATEWAY_URL_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let token = std::env::var(config::GATEWAY_TOKEN_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    match (url, token) {
+        (Some(url), Some(token)) => (url, token, "environment"),
+        _ => (
+            config::GATEWAY_URL.to_string(),
+            config::GATEWAY_TOKEN.to_string(),
+            "built-in",
+        ),
     }
 }
 
 fn client(state: &AppState) -> OpenRouterClient {
     state.client.clone()
+}
+
+/// Klienten för en inloggad användare. Tjänsten räknar anrop per konto, så
+/// varje anrop som kostar pengar skickar med vem som gör det.
+fn client_for(state: &AppState, user_id: &str) -> OpenRouterClient {
+    client(state).for_account(user_id)
 }
 
 /// Modellen som ska användas: kontots eget val i Profil om det finns, annars
@@ -1393,8 +1433,9 @@ fn role_models() -> ModelRoles {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiStatus {
+    /// Sant när appen har en AI-tjänst att anropa.
     pub configured: bool,
-    /// "environment" eller "none".
+    /// "environment" (under utveckling) eller "built-in".
     pub source: String,
     pub model: String,
     pub default_model: String,
@@ -1404,13 +1445,17 @@ pub struct AiStatus {
 }
 
 fn status_for(state: &AppState, user_id: &str) -> Result<AiStatus, AppError> {
-    let (key, source) = resolve_api_key();
+    let (url, token, source) = gateway_config();
+    let client = OpenRouterClient::new(&url, &token)?;
+
     Ok(AiStatus {
-        configured: key.is_some(),
+        configured: client.is_configured(),
         source: source.to_string(),
         model: resolve_model(state, user_id, None, ModelRole::Main)?,
         default_model: config::DEFAULT_MODEL.to_string(),
-        base_url: config::API_BASE_URL.to_string(),
+        // Adressen visas i Profil. Den är ingen hemlighet: nyckeln ligger hos
+        // tjänsten, inte i adressen.
+        base_url: url,
         suggested_models: config::SUGGESTED_MODELS
             .iter()
             .map(|model| model.to_string())
@@ -1422,16 +1467,18 @@ fn status_for(state: &AppState, user_id: &str) -> Result<AiStatus, AppError> {
 #[tauri::command]
 pub fn ai_status(state: State<'_, AppState>) -> Result<AiStatus, AppError> {
     // AI-anslutningen är till för en inloggad elev. Är ingen inloggad finns
-    // ingen anledning att berätta vilken nyckel som är konfigurerad.
+    // ingen anledning att berätta något om den.
     let user = require_session(&state)?;
     status_for(&state, &user.id)
 }
 
-/// Testar att nyckeln fungerar just nu. Kostnadsfritt anrop mot OpenRouter.
+/// Hämtar tjänstens läge: om betalmodellerna kan användas och vilka modeller
+/// som tar över när de inte kan. Kostnadsfritt anrop, till skillnad från en
+/// fråga till AI:n.
 #[tauri::command]
-pub async fn check_api_key(state: State<'_, AppState>) -> Result<KeyStatus, AppError> {
-    require_session(&state)?;
-    client(&state).key_status().await
+pub async fn check_api_key(state: State<'_, AppState>) -> Result<ServiceStatus, AppError> {
+    let user = require_session(&state)?;
+    client_for(&state, &user.id).service_status().await
 }
 
 #[tauri::command]
@@ -1493,7 +1540,7 @@ pub async fn chat_stream(
     // AI:n kostar pengar. Bara en inloggad elev får använda den.
     let user = require_session(&state)?;
 
-    let client = client(&state);
+    let client = client_for(&state, &user.id);
     let model = resolve_model(&state, &user.id, model, role.unwrap_or(ModelRole::Main))?;
     // Underlaget måste tillhöra den inloggade eleven.
     let source = source_from_material(&state, &user.id, material_id.as_deref())?;
@@ -1581,7 +1628,7 @@ pub async fn generate_material(
         return Err(AppError::Validation("Skriv vad materialet ska handla om.".to_string()));
     }
 
-    let client = client(&state);
+    let client = client_for(&state, &user.id);
     let model = resolve_model(&state, &user.id, model, role.unwrap_or(ModelRole::Study))?;
 
     let source = match request.material_id.as_deref() {
@@ -1904,67 +1951,173 @@ pub fn session_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
     app.path()
         .app_data_dir()
         .map_err(|err| AppError::Storage(err.to_string()))
-}
-
-#[cfg(test)]
+}#[cfg(test)]
 mod tests {
-    use super::{resolve_api_key, role_models};
+    use super::{gateway_config, role_models};
     use crate::config;
 
-    /// Sätter miljövariabeln under ett test och ställer tillbaka det exakta
-    /// värdet efteråt. Testerna som rör nyckeln körs därför med
-    /// `--test-threads=1` när de riktiga anropen är påslagna.
+    /// Sätter en miljövariabel under ett test och ställer tillbaka det exakta
+    /// värdet efteråt.
     struct WithEnv {
+        name: &'static str,
         previous: Option<String>,
     }
 
     impl WithEnv {
-        fn set(value: &str) -> Self {
-            let previous = std::env::var(config::API_KEY_ENV).ok();
+        fn set(name: &'static str, value: &str) -> Self {
+            let previous = std::env::var(name).ok();
             // I Rust 2024 är ändring av processens miljö osäker eftersom andra
             // trådar kan läsa den samtidigt.
-            unsafe { std::env::set_var(config::API_KEY_ENV, value) };
-            Self { previous }
+            unsafe { std::env::set_var(name, value) };
+            Self { name, previous }
         }
     }
 
     impl Drop for WithEnv {
         fn drop(&mut self) {
             match self.previous.take() {
-                Some(value) => unsafe { std::env::set_var(config::API_KEY_ENV, value) },
-                None => unsafe { std::env::remove_var(config::API_KEY_ENV) },
+                Some(value) => unsafe { std::env::set_var(self.name, value) },
+                None => unsafe { std::env::remove_var(self.name) },
+            }
+        }
+    }
+
+    /// Miljön rensas för de två variablerna, så att testerna inte påverkas av
+    /// vad som råkar vara satt på datorn.
+    fn without_environment<F: FnOnce()>(run: F) {
+        let url = std::env::var(config::GATEWAY_URL_ENV).ok();
+        let token = std::env::var(config::GATEWAY_TOKEN_ENV).ok();
+        unsafe {
+            std::env::remove_var(config::GATEWAY_URL_ENV);
+            std::env::remove_var(config::GATEWAY_TOKEN_ENV);
+        }
+
+        run();
+
+        unsafe {
+            match url {
+                Some(value) => std::env::set_var(config::GATEWAY_URL_ENV, value),
+                None => std::env::remove_var(config::GATEWAY_URL_ENV),
+            }
+            match token {
+                Some(value) => std::env::set_var(config::GATEWAY_TOKEN_ENV, value),
+                None => std::env::remove_var(config::GATEWAY_TOKEN_ENV),
             }
         }
     }
 
     #[test]
-    fn a_key_from_the_environment_is_used_and_trimmed() {
-        let _guard = WithEnv::set("  nyckel-för-test  ");
+    fn the_built_in_service_is_used_when_nothing_is_set() {
+        without_environment(|| {
+            let (url, token, source) = gateway_config();
 
-        let (key, source) = resolve_api_key();
-        assert_eq!(key.as_deref(), Some("nyckel-för-test"));
-        assert_eq!(source, "environment");
+            assert_eq!(url, config::GATEWAY_URL);
+            assert_eq!(token, config::GATEWAY_TOKEN);
+            assert_eq!(source, "built-in");
+        });
     }
 
     #[test]
-    fn an_empty_or_blank_key_counts_as_missing() {
-        for value in ["", "   ", "\n\t"] {
-            let _guard = WithEnv::set(value);
-            let (key, source) = resolve_api_key();
-            assert!(key.is_none(), "{value:?} borde inte räknas som en nyckel");
-            assert_eq!(source, "none");
+    fn the_environment_can_point_at_a_local_service() {
+        without_environment(|| {
+            let _url = WithEnv::set(config::GATEWAY_URL_ENV, "  http://127.0.0.1:8787  ");
+            let _token = WithEnv::set(config::GATEWAY_TOKEN_ENV, "  lokal-markering  ");
+
+            let (url, token, source) = gateway_config();
+            assert_eq!(url, "http://127.0.0.1:8787");
+            assert_eq!(token, "lokal-markering");
+            assert_eq!(source, "environment");
+        });
+    }
+
+    #[test]
+    fn half_an_environment_falls_back_to_the_built_in_service() {
+        // Bara en av de två satta: då används den inbyggda tjänsten, så att en
+        // kvarglömd variabel inte pekar appen mot en halv konfiguration.
+        without_environment(|| {
+            let _url = WithEnv::set(config::GATEWAY_URL_ENV, "http://127.0.0.1:8787");
+
+            let (url, _, source) = gateway_config();
+            assert_eq!(source, "built-in");
+            assert_eq!(url, config::GATEWAY_URL);
+        });
+    }
+
+    #[test]
+    fn the_app_holds_no_openrouter_credential() {
+        // Nyckeln finns bara hos AI-tjänsten. Appen får inte ens ha en adress
+        // eller en markering som liknar en nyckel.
+        assert!(!config::GATEWAY_URL.contains("openrouter"));
+        assert!(!looks_like_a_key(config::GATEWAY_TOKEN));
+        assert!(!config::GATEWAY_TOKEN.is_empty());
+    }
+
+    /// Sant när texten innehåller något som ser ut som en riktig
+    /// OpenRouter-nyckel: prefixet följt av minst 30 tecken.
+    ///
+    /// Korta förekomster av prefixet räknas inte – de är kontroller som den
+    /// här, inte nycklar.
+    fn looks_like_a_key(text: &str) -> bool {
+        const PREFIX: &str = "sk-or-v1-";
+
+        text.match_indices(PREFIX).any(|(index, _)| {
+            let rest = &text[index + PREFIX.len()..];
+            rest.chars()
+                .take(40)
+                .filter(char::is_ascii_alphanumeric)
+                .count()
+                >= 30
+        })
+    }
+
+    /// Letar igenom projektets källkod efter en OpenRouter-nyckel.
+    ///
+    /// En nyckel som ligger i en fil följer med i bygget, i installationsfilen
+    /// och i repot. Testet läser därför igenom källfilerna på riktigt i stället
+    /// för att bara lita på att ingen skriver in en.
+    #[test]
+    fn no_source_file_contains_an_openrouter_key() {
+        fn scan(dir: &std::path::Path, found: &mut Vec<String>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                // Dolda filer (som .env) och byggda filer räknas inte: .env är
+                // spärrad i .gitignore och följer inte med i ett bygge.
+                if name.starts_with('.') || name == "target" || name == "node_modules" {
+                    continue;
+                }
+
+                let path = entry.path();
+                if path.is_dir() {
+                    scan(&path, found);
+                    continue;
+                }
+
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    if looks_like_a_key(&text) {
+                        found.push(path.display().to_string());
+                    }
+                }
+            }
         }
-    }
 
-    #[test]
-    fn the_key_is_never_read_from_a_file_in_the_project() {
-        // En nyckel som ligger i en fil följer med i bygget. Den får bara
-        // komma från miljön, så en tom miljö måste betyda "ingen nyckel".
-        let _guard = WithEnv::set("");
-        let (key, source) = resolve_api_key();
+        let mut found = Vec::new();
+        for dir in [
+            std::path::Path::new("src"),
+            std::path::Path::new("../src"),
+            std::path::Path::new("../ai-proxy/src"),
+            std::path::Path::new("../ai-proxy/test"),
+        ] {
+            scan(dir, &mut found);
+        }
 
-        assert!(key.is_none());
-        assert_eq!(source, "none");
+        assert!(
+            found.is_empty(),
+            "en nyckel ligger i källkoden: {found:?}"
+        );
     }
 
     #[test]
@@ -1974,10 +2127,10 @@ mod tests {
         // i Profil i stället för ett fel, så namnformen låses här.
         let status = super::AiStatus {
             configured: true,
-            source: "environment".to_string(),
+            source: "built-in".to_string(),
             model: config::MAIN_MODEL.to_string(),
             default_model: config::DEFAULT_MODEL.to_string(),
-            base_url: config::API_BASE_URL.to_string(),
+            base_url: config::GATEWAY_URL.to_string(),
             suggested_models: config::SUGGESTED_MODELS
                 .iter()
                 .map(|model| model.to_string())
@@ -1988,9 +2141,9 @@ mod tests {
         let json = serde_json::to_value(&status).unwrap();
 
         assert_eq!(json["configured"], true);
-        assert_eq!(json["source"], "environment");
+        assert_eq!(json["source"], "built-in");
         assert_eq!(json["defaultModel"], config::MAIN_MODEL);
-        assert_eq!(json["baseUrl"], "https://openrouter.ai/api/v1");
+        assert_eq!(json["baseUrl"], config::GATEWAY_URL);
         assert!(json["suggestedModels"].as_array().unwrap().len() >= 2);
 
         for role in ["main", "study", "economy", "backup"] {
@@ -2041,7 +2194,8 @@ mod login_tests {
     fn state_in(dir: &std::path::Path) -> AppState {
         AppState {
             storage: Storage::new(dir).expect("kunde inte skapa lagringen"),
-            client: OpenRouterClient::new(None).expect("kunde inte skapa klienten"),
+            client: OpenRouterClient::new(crate::config::GATEWAY_URL, crate::config::GATEWAY_TOKEN)
+                .expect("kunde inte skapa klienten"),
             models: tokio::sync::Mutex::new(None),
             session: std::sync::Mutex::new(None),
             session_dir: dir.to_path_buf(),
@@ -2223,21 +2377,24 @@ mod login_tests {
 mod gate_tests {
     use super::{
         account_after_person_change, attempts_for, delete_material_of, ensure_person_is_unique,
-        material_of, materials_of, person_after_profile_change, require_admin, require_session,
-        resolve_model, schedule_for_user, session, set_model_for, settings_for, split_display_name,
-        store_attempt, store_material, store_person, update_own_profile, validate_assignment,
-        validate_exam, validate_schedule_slot, AppState, SaveMaterialRequest,
+        material_of, materials_of, messages_for_role, person_after_profile_change, require_admin,
+        require_session, resolve_model, schedule_for_user, session, set_model_for, settings_for,
+        split_display_name, store_attempt, store_material, store_person, update_own_profile,
+        validate_assignment, validate_exam, validate_schedule_slot, AppState, SaveMaterialRequest,
     };
     use crate::auth::{create_user, login, set_active, set_person, set_role, PublicUser};
     use crate::config::ModelRole;
     use crate::openrouter::OpenRouterClient;
-    use crate::storage::{Assignment, Exam, Person, Role, ScheduleEntry, Storage};
+    use crate::storage::{
+        AdminMessage, Assignment, Audience, Exam, Person, Role, ScheduleEntry, Storage,
+    };
 
     fn state() -> (AppState, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("lumi-gate-{}", uuid::Uuid::new_v4()));
         let state = AppState {
             storage: Storage::new(&dir).expect("kunde inte skapa testmappen"),
-            client: OpenRouterClient::new(None).expect("kunde inte skapa klienten"),
+            client: OpenRouterClient::new(crate::config::GATEWAY_URL, crate::config::GATEWAY_TOKEN)
+                .expect("kunde inte skapa klienten"),
             models: tokio::sync::Mutex::new(None),
             session: std::sync::Mutex::new(None),
             // I appen ligger den sparade sessionen bredvid datamappen.
@@ -2245,6 +2402,107 @@ mod gate_tests {
             login_guard: crate::auth::LoginGuard::new(),
         };
         (state, dir)
+    }
+
+    /// Sparar en nyhet med en viss mottagare.
+    fn news(state: &AppState, audience: Audience, title: &str) {
+        state
+            .storage
+            .save_admin_message(&AdminMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: "nyhet".to_string(),
+                title: title.to_string(),
+                body: "Text".to_string(),
+                created_at_ms: 1,
+                author_name: "Administratör".to_string(),
+                audience,
+            })
+            .expect("nyheten borde kunna sparas");
+    }
+
+    fn titles(messages: Vec<AdminMessage>) -> Vec<String> {
+        let mut titles: Vec<String> = messages.into_iter().map(|message| message.title).collect();
+        titles.sort();
+        titles
+    }
+
+    // ── Nyheterna och behörigheten ────────────────────────────────────────
+
+    #[test]
+    fn each_role_sees_exactly_what_is_meant_for_it() {
+        let (state, dir) = state();
+
+        news(&state, Audience::Everyone, "Alla");
+        news(&state, Audience::Students, "Eleverna");
+        news(&state, Audience::Teachers, "Lärarna");
+
+        assert_eq!(
+            titles(messages_for_role(&state, Role::Student).unwrap()),
+            vec!["Alla".to_string(), "Eleverna".to_string()]
+        );
+        assert_eq!(
+            titles(messages_for_role(&state, Role::Teacher).unwrap()),
+            vec!["Alla".to_string(), "Lärarna".to_string()]
+        );
+        // Administratören ser allt, och har dessutom den egna adminlistan.
+        assert_eq!(
+            titles(messages_for_role(&state, Role::Admin).unwrap()),
+            vec!["Alla".to_string(), "Eleverna".to_string(), "Lärarna".to_string()]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn without_a_session_nothing_is_read() {
+        // Gränssnittet kan inte hoppa över rollkontrollen: utan inloggning
+        // svarar backend med ett fel i stället för med skolans nyheter.
+        let (state, dir) = state();
+        news(&state, Audience::Everyone, "Alla");
+
+        assert_eq!(
+            require_session(&state).unwrap_err().kind(),
+            "not-signed-in"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_old_news_item_without_audience_reaches_everyone() {
+        // Poster som sparades innan mottagaren fanns saknar fältet. De ska
+        // läsas som "alla" i stället för att bli osynliga.
+        let old = serde_json::json!({
+            "id": "gammal",
+            "kind": "nyhet",
+            "title": "Gammal nyhet",
+            "body": "Text",
+            "createdAtMs": 1,
+            "authorName": "Administratör"
+        });
+
+        let message: AdminMessage = serde_json::from_value(old).expect("gammal post borde gå att läsa");
+        assert_eq!(message.audience, Audience::Everyone);
+        assert!(message.visible_to(Role::Student));
+        assert!(message.visible_to(Role::Teacher));
+    }
+
+    #[test]
+    fn a_saved_news_item_carries_its_audience_back() {
+        // Gränssnittet läser `audience` för att kunna visa vem posten gäller.
+        let status = serde_json::to_value(AdminMessage {
+            id: "1".to_string(),
+            kind: "nyhet".to_string(),
+            title: "Nyhet".to_string(),
+            body: "Text".to_string(),
+            created_at_ms: 1,
+            author_name: "Administratör".to_string(),
+            audience: Audience::Students,
+        })
+        .unwrap();
+
+        assert_eq!(status["audience"], "elever");
+        assert_eq!(status["createdAtMs"], 1);
     }
 
     /// En person i registret, för schematesterna.

@@ -17,9 +17,9 @@ import {
   setModel,
   toLumiError,
   type AiStatus,
-  type KeyStatus,
   type ModelInfo,
   type PublicUser,
+  type ServiceStatus,
 } from "../lib/backend";
 
 interface ProfileProps {
@@ -27,11 +27,15 @@ interface ProfileProps {
   user: PublicUser | null;
 }
 
-/** Var nyckeln är konfigurerad. Nyckeln själv visas aldrig i gränssnittet. */
+/**
+ * Varifrån adressen till AI-tjänsten kommer.
+ *
+ * Nyckeln till OpenRouter finns bara hos tjänsten och visas aldrig här – det
+ * finns ingenting att visa.
+ */
 const SOURCE_TEXT: Record<string, string> = {
-  keyring: "Windows Credential Manager",
-  environment: "miljövariabeln OPENROUTER_API_KEY",
-  none: "ingen nyckel",
+  "built-in": "den inbyggda tjänsten i appen",
+  environment: "miljövariabler på den här datorn (utvecklingsläge)",
 };
 
 export default function Profile({ user }: ProfileProps) {
@@ -40,7 +44,7 @@ export default function Profile({ user }: ProfileProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [keyInfo, setKeyInfo] = useState<KeyStatus | null>(null);
+  const [service, setService] = useState<ServiceStatus | null>(null);
 
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelQuery, setModelQuery] = useState("");
@@ -71,8 +75,12 @@ export default function Profile({ user }: ProfileProps) {
     setNotice(null);
     try {
       const info = await checkApiKey();
-      setKeyInfo(info);
-      setNotice("Anslutningen till OpenRouter fungerar.");
+      setService(info);
+      setNotice(
+        info.creditsOk
+          ? "AI-tjänsten svarar och kontot kan använda standardmodellerna."
+          : "AI-tjänsten svarar. Kontot saknar krediter, så svaren kommer från en gratismodell."
+      );
     } catch (raw) {
       setError(toLumiError(raw).message);
     } finally {
@@ -158,7 +166,7 @@ export default function Profile({ user }: ProfileProps) {
         <div className="panel__head">
           <h2 className="panel__title">
             <KeyRound className="panel__icon" size={18} strokeWidth={2.1} aria-hidden />
-            OpenRouter-anslutning
+            AI-anslutning
           </h2>
           {status && (
             <span className={`status-pill${status.configured ? " is-on" : ""}`}>
@@ -179,16 +187,14 @@ export default function Profile({ user }: ProfileProps) {
 
         {status?.configured ? (
           <p className="panel__text">
-            Nyckeln är konfigurerad i {SOURCE_TEXT[status.source] ?? SOURCE_TEXT.none}.
-            Lumi läser den i backend när appen startar och skickar den bara till
-            OpenRouter. Den finns inte i gränssnittet, i projektet eller i en färdig
-            .exe-fil – och den behöver aldrig skrivas in här.
+            Lumi skickar varje AI-fråga till {SOURCE_TEXT[status.source] ?? "AI-tjänsten"},
+            som i sin tur anropar OpenRouter. Nyckeln till OpenRouter ligger hos
+            tjänsten och finns därför varken i appen, i installationsfilen eller i
+            projektet – den behöver aldrig skrivas in här.
           </p>
         ) : (
           <p className="panel__text">
-            Ingen nyckel hittades. Lägg in <code>OPENROUTER_API_KEY</code> i Windows
-            miljövariabler och starta om Lumi. Nyckeln får aldrig läggas i
-            frontend-koden eller i projektet.
+            Appen är inte kopplad till någon AI-tjänst. Kontakta din administratör.
           </p>
         )}
 
@@ -199,10 +205,13 @@ export default function Profile({ user }: ProfileProps) {
           </button>
         </div>
 
-        {keyInfo && (
+        {service && (
           <p className="panel__hint">
-            Nyckeln svarar. Totalt använt {keyInfo.usage.toFixed(4)} USD
-            {keyInfo.limit !== null ? ` av ${keyInfo.limit} USD` : " (ingen gräns satt)"}
+            {service.creditsOk
+              ? `Kontot kan använda standardmodellerna. ${service.creditsLeft.toFixed(2)} USD kvar.`
+              : `Kontot saknar krediter för standardmodellerna. Svaren kommer från ${
+                  service.fallbackModels[0] ?? "en gratismodell"
+                } så länge.`}
           </p>
         )}
       </div>
@@ -254,7 +263,7 @@ export default function Profile({ user }: ProfileProps) {
         )}
 
         <details className="models">
-          <summary>Sök bland alla modeller hos OpenRouter</summary>
+          <summary>Sök bland alla modeller som tjänsten erbjuder</summary>
           <div className="profile__row">
             <input
               className="field"
@@ -298,13 +307,13 @@ export default function Profile({ user }: ProfileProps) {
         <div className="panel__head">
           <h2 className="panel__title">
             <ShieldCheck className="panel__icon" size={18} strokeWidth={2.1} aria-hidden />
-            Så skyddas din nyckel
+            Så skyddas AI-nyckeln
           </h2>
         </div>
         <ul className="section-block__bullets">
-          <li>Nyckeln läses bara i Rust-backend och skickas därifrån till OpenRouter.</li>
-          <li>Den skrivs aldrig i projektet, i loggar eller i en färdig .exe-fil.</li>
-          <li>Den visas aldrig i gränssnittet och efterfrågas aldrig här.</li>
+          <li>Nyckeln till OpenRouter finns bara hos AI-tjänsten, som en hemlighet på servern.</li>
+          <li>Den finns inte i appen, i installationsfilen, i gränssnittet eller i projektet.</li>
+          <li>Alla AI-frågor går genom Rust-backend till tjänsten – gränssnittet ser dem aldrig direkt.</li>
           <li>AI-genererat material valideras i backend innan det får sparas i Plugga.</li>
         </ul>
       </div>

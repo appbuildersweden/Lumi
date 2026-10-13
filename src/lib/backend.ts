@@ -33,6 +33,11 @@ export interface ChatUsage {
   cost: number | null;
   /** Sant när modellen nådde sin längdgräns innan den var klar. */
   truncated: boolean;
+  /**
+   * Modellen som svarade i stället för den valda, när kontot inte kan använda
+   * betalmodellerna. Null när svaret kommer från den valda modellen.
+   */
+  fallback: string | null;
 }
 
 /** Modellen som varje roll använder, så som backend har konfigurerat den. */
@@ -62,9 +67,13 @@ export interface ModelInfo {
   completionPrice: number;
 }
 
-export interface KeyStatus {
-  usage: number;
-  limit: number | null;
+/** Kontots läge hos AI-tjänsten. Innehåller ingen nyckel – bara om svaren
+ * just nu kan komma från standardmodellerna. */
+export interface ServiceStatus {
+  creditsOk: boolean;
+  creditsLeft: number;
+  /** Modellerna som tar över när kontot inte kan använda standardmodellerna. */
+  fallbackModels: string[];
 }
 
 /** Rollen ett konto har. Rollen bestäms alltid i backend. */
@@ -186,6 +195,9 @@ export interface ScheduleEntry {
   createdAtMs: number;
 }
 
+/** Vilka som ser en nyhet eller ett meddelande. */
+export type Audience = "alla" | "elever" | "lärare";
+
 /** En nyhet eller ett viktigt meddelande. */
 export interface AdminMessage {
   id: string;
@@ -195,7 +207,16 @@ export interface AdminMessage {
   body: string;
   createdAtMs: number;
   authorName: string;
+  /** Vem posten är riktad till. Backend svarar alltid med ett värde. */
+  audience: Audience;
 }
+
+/** Hur mottagarna skrivs i gränssnittet. */
+export const AUDIENCE_LABELS: Record<Audience, string> = {
+  alla: "Alla",
+  elever: "Elever",
+  "lärare": "Lärare",
+};
 
 export interface ActivityEntry {
   id: string;
@@ -375,8 +396,8 @@ export function getAiStatus(): Promise<AiStatus> {
   return call<AiStatus>("ai_status");
 }
 
-export function checkApiKey(): Promise<KeyStatus> {
-  return call<KeyStatus>("check_api_key");
+export function checkApiKey(): Promise<ServiceStatus> {
+  return call<ServiceStatus>("check_api_key");
 }
 
 export function listModels(query?: string): Promise<ModelInfo[]> {
@@ -802,6 +823,17 @@ export function deleteScheduleEntry(id: string): Promise<void> {
 
 export function listAdminMessages(): Promise<AdminMessage[]> {
   return call<AdminMessage[]>("list_admin_messages");
+}
+
+/**
+ * Nyheterna och meddelandena som är riktade till den inloggade.
+ *
+ * Backend avgör vad som skickas tillbaka utifrån rollen i databasen – eleven
+ * och läraren ser bara det som gäller dem. Administratören använder i stället
+ * `listAdminMessages` och ser allt.
+ */
+export function myAdminMessages(): Promise<AdminMessage[]> {
+  return call<AdminMessage[]>("my_admin_messages");
 }
 
 export function saveAdminMessage(message: AdminMessage): Promise<AdminMessage> {

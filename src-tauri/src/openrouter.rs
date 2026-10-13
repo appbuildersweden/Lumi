@@ -1,7 +1,11 @@
-//! Klient mot OpenRouter.
+//! Klient mot Lumis AI-tjänst.
 //!
-//! Modulen känner inte till Tauri. Det gör att den kan testas direkt mot det
-//! riktiga API:et utan att starta ett appfönster.
+//! Tjänsten talar samma språk som OpenRouter – samma anrop, samma svar och
+//! samma felformat – men håller OpenRouters nyckel på servern. Den här modulen
+//! ser därför aldrig någon nyckel, och ingenting i appen kan läsa ut en.
+//!
+//! Modulen känner inte till Tauri. Det gör att den kan testas direkt mot den
+//! riktiga tjänsten utan att starta ett appfönster.
 
 use std::time::Duration;
 
@@ -45,6 +49,10 @@ pub struct ChatUsage {
     /// Sant när modellen nådde sin tokenbudget innan den var klar. Gränssnittet
     /// visar då en tydlig varning i stället för att låta svaret se färdigt ut.
     pub truncated: bool,
+    /// Satt när svaret kommer från en gratismodell i stället för den valda
+    /// modellen, eftersom kontot inte kan använda betalmodellerna just nu.
+    /// Gränssnittet berättar det för eleven.
+    pub fallback: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,17 +67,40 @@ pub struct ModelInfo {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct KeyStatus {
-    /// Total kostnad i USD för nyckeln.
-    pub usage: f64,
-    /// Satt gräns i USD, om någon finns.
-    pub limit: Option<f64>,
+pub struct ServiceStatus {
+    /// Sant när kontot kan använda betalmodellerna.
+    pub credits_ok: bool,
+    /// Kvarvarande krediter i USD, enligt tjänstens svar.
+    pub credits_left: f64,
+    /// Modellerna som används i stället när betalmodellerna inte kan användas.
+    pub fallback_models: Vec<String>,
+}
+
+/// Ett kort och stabilt id för ett konto.
+///
+/// Tjänstens räknare behöver kunna skilja konton åt, men har ingen nytta av
+/// kontots id i klartext. FNV-1a valdes för att den är beroende av varken
+/// tidszon, slump eller Rust-version: samma konto ger alltid samma id.
+#[must_use]
+pub fn account_id(user_id: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in user_id.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
 }
 
 #[derive(Clone)]
 pub struct OpenRouterClient {
     http: reqwest::Client,
-    api_key: Option<String>,
+    /// Adressen till AI-tjänsten. Tom om appen byggts utan en.
+    base_url: String,
+    /// Markeringen som visar att anropet kommer från Lumis app. Inte en nyckel:
+    /// den kan läsas ut ur appen och byts genom att uppdatera tjänsten.
+    token: String,
+    /// Kontot anropet görs för, hashat. Sätts med [`Self::for_account`].
+    account: Option<String>,
 }
 
 /// Kör ett anrop och gör ett begränsat antal nya försök vid tillfälliga fel.
@@ -100,46 +131,71 @@ where
 }
 
 impl OpenRouterClient {
-    pub fn new(api_key: Option<String>) -> Result<Self, AppError> {
+    /// Klient mot tjänsten på `base_url`, med markeringen `token`.
+    pub fn new(base_url: &str, token: &str) -> Result<Self, AppError> {
         let http = reqwest::Client::builder()
             .user_agent(format!("{}/{}", config::APP_TITLE, env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(config::REQUEST_TIMEOUT_SECS))
             .build()
             .map_err(|err| AppError::Network(err.to_string()))?;
 
-        Ok(Self { http, api_key })
+        Ok(Self {
+            http,
+            base_url: base_url.trim().trim_end_matches('/').to_string(),
+            token: token.trim().to_string(),
+            account: None,
+        })
     }
 
-    fn key(&self) -> Result<&str, AppError> {
-        self.api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|key| !key.is_empty())
-            .ok_or(AppError::MissingApiKey)
+    /// Klienten för ett konto.
+    ///
+    /// Tjänsten räknar anrop per konto. Allt som kostar pengar måste därför
+    /// tala om vem som gör anropet – annars avvisas det av [`Self::authorized`].
+    #[must_use]
+    pub fn for_account(&self, user_id: &str) -> Self {
+        let mut client = self.clone();
+        client.account = Some(account_id(user_id));
+        client
+    }
+
+    /// Sant när appen har en tjänst att anropa.
+    #[must_use]
+    pub fn is_configured(&self) -> bool {
+        !self.base_url.is_empty() && !self.token.is_empty()
     }
 
     fn endpoint(&self, path: &str) -> String {
-        format!("{}{}", config::API_BASE_URL, path)
+        format!("{}{}", self.base_url, path)
     }
 
+    /// Lägger på markeringen och kontot. Kräver en inloggad användare: ett
+    /// anrop utan konto skulle varken gå att begränsa eller följa upp.
     fn authorized(&self, request: reqwest::RequestBuilder) -> Result<reqwest::RequestBuilder, AppError> {
+        if !self.is_configured() {
+            return Err(AppError::MissingApiKey);
+        }
+
+        let account = self.account.as_deref().ok_or(AppError::NotSignedIn)?;
+
         Ok(request
-            .bearer_auth(self.key()?)
+            .header("X-Lumi-Client", &self.token)
+            .header("X-Lumi-User", account)
             .header("HTTP-Referer", config::APP_REFERER)
             .header("X-Title", config::APP_TITLE))
     }
 
     /// Gör om ett felsvar till ett läsbart fel. Läser OpenRouters felformat
     /// `{"error": {"message": ..., "code": ...}}`.
-    /// Tar bort nyckeln ur en text. Anropas på allt som kommer från servern
-    /// innan det får bli ett felmeddelande, så att nyckeln aldrig kan följa
-    /// med ut i gränssnittet eller i en loggrad.
+    /// Tar bort markeringen ur en text. Anropas på allt som kommer från servern
+    /// innan det får bli ett felmeddelande, så att ingenting som hör till
+    /// anropet kan följa med ut i gränssnittet eller i en loggrad.
     fn redact(&self, text: &str) -> String {
-        let Some(key) = self.api_key.as_deref().map(str::trim).filter(|key| !key.is_empty()) else {
-            return text.to_string();
+        let redacted = if self.token.is_empty() {
+            text.to_string()
+        } else {
+            text.replace(&self.token, "[markeringen borttagen]")
         };
 
-        let redacted = text.replace(key, "[nyckeln borttagen]");
         // Ett mycket långt svar från servern hjälper ingen elev.
         redacted.chars().take(300).collect()
     }
@@ -192,17 +248,21 @@ impl OpenRouterClient {
         }
     }
 
-    /// Hämtar aktuell modellista. Kräver ingen nyckel, men skickar den om den finns.
+    /// Hämtar aktuell modellista. Listan rör ingen nyckel, men anropet måste
+    /// ändå komma från Lumis app.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
-        let mut request = self.http.get(self.endpoint(config::MODELS_PATH));
-        if let Ok(key) = self.key() {
-            request = request
-                .bearer_auth(key)
-                .header("HTTP-Referer", config::APP_REFERER)
-                .header("X-Title", config::APP_TITLE);
+        if !self.is_configured() {
+            return Err(AppError::MissingApiKey);
         }
 
-        let response = request.send().await?;
+        let response = self
+            .http
+            .get(self.endpoint(config::MODELS_PATH))
+            .header("X-Lumi-Client", &self.token)
+            .header("HTTP-Referer", config::APP_REFERER)
+            .header("X-Title", config::APP_TITLE)
+            .send()
+            .await?;
         if !response.status().is_success() {
             return Err(self.error_from_response(response).await);
         }
@@ -243,11 +303,12 @@ impl OpenRouterClient {
             .collect())
     }
 
-    /// Kontrollerar att nyckeln fungerar och hämtar nyckelns status.
-    /// Anropet är kostnadsfritt, till skillnad från ett chattanrop.
-    pub async fn key_status(&self) -> Result<KeyStatus, AppError> {
+    /// Hämtar tjänstens läge: om kontot kan använda betalmodellerna och vilka
+    /// gratismodeller som tar över när det inte kan. Anropet är kostnadsfritt,
+    /// till skillnad från ett chattanrop.
+    pub async fn service_status(&self) -> Result<ServiceStatus, AppError> {
         let response = self
-            .authorized(self.http.get(self.endpoint(config::KEY_PATH)))?
+            .authorized(self.http.get(self.endpoint(config::STATUS_PATH)))?
             .send()
             .await?;
 
@@ -256,13 +317,29 @@ impl OpenRouterClient {
         }
 
         let body: Value = response.json().await?;
-        let data = body.get("data").unwrap_or(&body);
 
-        // `label` i svaret är en maskerad variant av nyckeln. Den läses
-        // medvetet inte in, så att inga delar av nyckeln lämnar backend.
-        Ok(KeyStatus {
-            usage: data.get("usage").and_then(Value::as_f64).unwrap_or(0.0),
-            limit: data.get("limit").and_then(Value::as_f64),
+        // Svaret innehåller bara kontots läge. Ingen del av nyckeln finns i det,
+        // och tjänsten skickar aldrig vidare någon.
+        Ok(ServiceStatus {
+            credits_ok: body
+                .get("creditsOk")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            credits_left: body
+                .get("creditsLeft")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            fallback_models: body
+                .get("fallbackModels")
+                .and_then(Value::as_array)
+                .map(|models| {
+                    models
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }
 
@@ -305,8 +382,18 @@ impl OpenRouterClient {
         })
         .await?;
 
+        // Tjänsten berättar i ett huvud om svaret kommer från en gratismodell.
+        // Huvudet finns innan texten börjar strömma, så eleven kan få veta det
+        // redan medan svaret skrivs.
+        let fallback = response
+            .headers()
+            .get("X-Lumi-Fallback")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+
         let mut usage = ChatUsage {
             model: model.to_string(),
+            fallback,
             ..Default::default()
         };
 
@@ -420,8 +507,15 @@ impl OpenRouterClient {
         })
         .await?;
 
+        let fallback = response
+            .headers()
+            .get("X-Lumi-Fallback")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+
         let mut usage = ChatUsage {
             model: model.to_string(),
+            fallback,
             ..Default::default()
         };
 
@@ -452,14 +546,20 @@ impl OpenRouterClient {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChatMessage, ChatUsage, OpenRouterClient, with_retry};
+    use super::{ChatMessage, ChatUsage, OpenRouterClient, ServiceStatus, account_id, with_retry};
     use crate::config;
     use crate::error::AppError;
     use crate::materials::{self, GenerateRequest};
 
-    /// Klient med den riktiga nyckeln, för de tester som gör anrop mot
-    /// OpenRouter. De är märkta `#[ignore]` så att `cargo test` visar dem som
-    /// överhoppade i stället för att låtsas att de har körts.
+    /// En markering som bara finns i testerna. Den riktiga står i
+    /// `config::GATEWAY_TOKEN`.
+    const TEST_TOKEN: &str = "markering-for-test";
+
+    /// Klient mot den riktiga AI-tjänsten, för de tester som gör anrop.
+    ///
+    /// Ingen nyckel behövs lokalt: nyckeln ligger hos tjänsten. Testerna är
+    /// märkta `#[ignore]` så att `cargo test` visar dem som överhoppade i
+    /// stället för att låtsas att de har körts.
     ///
     /// Kör dem med: `cargo test -- --ignored`.
     fn live_client() -> OpenRouterClient {
@@ -467,25 +567,37 @@ mod tests {
             let _ = dotenvy::from_filename(candidate);
         }
 
-        let key = std::env::var(config::API_KEY_ENV)
-            .ok()
-            .filter(|key| !key.trim().is_empty())
-            .expect("OPENROUTER_API_KEY saknas, så det riktiga anropet kan inte göras");
+        let (url, token, _) = crate::commands::gateway_config();
+        let client = OpenRouterClient::new(&url, &token).expect("kunde inte skapa klienten");
+        assert!(client.is_configured(), "ingen AI-tjänst är konfigurerad");
 
-        OpenRouterClient::new(Some(key)).expect("kunde inte skapa klienten")
+        // Tjänsten räknar anrop per konto, precis som appen gör.
+        client.for_account("lumi-live-test")
     }
 
     // -- Utan nätverk -----------------------------------------------------
 
     #[test]
-    fn the_key_is_removed_from_error_text() {
-        let key = "sk-or-v1-hemlig-nyckel-som-inte-finns";
-        let client = OpenRouterClient::new(Some(key.to_string())).unwrap();
+    fn the_marking_is_removed_from_error_text() {
+        let client = OpenRouterClient::new(config::GATEWAY_URL, TEST_TOKEN).unwrap();
 
-        let redacted = client.redact(&format!("OpenRouter svarade: nyckeln {key} är ogiltig"));
+        let redacted = client.redact(&format!("Tjänsten svarade: markeringen {TEST_TOKEN} är fel"));
 
-        assert!(!redacted.contains(key));
-        assert!(redacted.contains("[nyckeln borttagen]"));
+        assert!(!redacted.contains(TEST_TOKEN));
+        assert!(redacted.contains("[markeringen borttagen]"));
+    }
+
+    #[test]
+    fn an_account_id_is_stable_and_does_not_reveal_the_account() {
+        // Samma konto ska alltid ge samma id – annars skulle takten räknas per
+        // anrop i stället för per konto.
+        assert_eq!(account_id("konto-1"), account_id("konto-1"));
+        assert_ne!(account_id("konto-1"), account_id("konto-2"));
+
+        // Och id:t får inte innehålla kontots id i klartext.
+        let id = account_id("elev@edu.ronneby.se");
+        assert_eq!(id.len(), 16);
+        assert!(!id.contains("ronneby"));
     }
 
     #[test]
@@ -498,6 +610,7 @@ mod tests {
             completion_tokens: 34,
             cost: Some(0.0009),
             truncated: true,
+            fallback: Some("nvidia/nemotron-3-super-120b-a12b:free".to_string()),
         };
 
         let json = serde_json::to_value(&usage).unwrap();
@@ -505,26 +618,47 @@ mod tests {
         assert_eq!(json["promptTokens"], 12);
         assert_eq!(json["completionTokens"], 34);
         assert_eq!(json["model"], config::MAIN_MODEL);
+        // Gränssnittet läser `fallback` för att kunna berätta att svaret kom
+        // från en gratismodell.
+        assert_eq!(json["fallback"], "nvidia/nemotron-3-super-120b-a12b:free");
     }
 
     #[test]
-    fn redaction_does_nothing_when_there_is_no_key() {
-        let client = OpenRouterClient::new(None).unwrap();
+    fn redaction_does_nothing_when_there_is_nothing_to_hide() {
+        let client = OpenRouterClient::new(config::GATEWAY_URL, "").unwrap();
         assert_eq!(client.redact("inget att dölja"), "inget att dölja");
     }
 
     #[tokio::test]
-    async fn a_missing_key_is_reported_before_any_network_call() {
-        let client = OpenRouterClient::new(None).unwrap();
-        let messages = crate::chat::build_messages(&[ChatMessage::user("Hej")], None);
+    async fn a_missing_service_is_reported_before_any_network_call() {
+        // En app utan tjänst ska säga det direkt i stället för att försöka.
+        let client = OpenRouterClient::new("", "").unwrap();
+        assert!(!client.is_configured());
 
+        let messages = crate::chat::build_messages(&[ChatMessage::user("Hej")], None);
         let error = client
             .stream_chat(&messages, config::MAIN_MODEL, 100, |_| {})
             .await
-            .expect_err("utan nyckel ska anropet stoppas");
+            .expect_err("utan tjänst ska anropet stoppas");
 
         assert_eq!(error.kind(), "missing-api-key");
         assert!(!error.is_transient());
+    }
+
+    #[tokio::test]
+    async fn an_account_is_required_for_everything_that_costs_money() {
+        // Tjänsten begränsar anrop per konto. Ett anrop utan konto ska därför
+        // aldrig lämna appen.
+        let client = OpenRouterClient::new(config::GATEWAY_URL, TEST_TOKEN).unwrap();
+        assert!(client.is_configured());
+
+        let messages = crate::chat::build_messages(&[ChatMessage::user("Hej")], None);
+        let error = client
+            .stream_chat(&messages, config::MAIN_MODEL, 100, |_| {})
+            .await
+            .expect_err("utan konto ska anropet stoppas");
+
+        assert_eq!(error.kind(), "not-signed-in");
     }
 
     #[tokio::test]
@@ -570,15 +704,22 @@ mod tests {
         assert_eq!(attempts, config::MAX_RETRIES + 1);
     }
 
-    // -- Riktiga anrop mot OpenRouter (kräver LUMI_LIVE_TESTS=1) ----------
+    // -- Riktiga anrop mot AI-tjänsten ------------------------------------
 
     #[tokio::test]
-    #[ignore = "gör riktiga anrop mot OpenRouter – kör med: cargo test -- --ignored"]
-    async fn live_key_works_and_every_role_exists() {
+    #[ignore = "gör riktiga anrop mot AI-tjänsten – kör med: cargo test -- --ignored"]
+    async fn live_the_service_answers_and_every_role_exists() {
         let client = live_client();
 
-        let status = client.key_status().await.expect("nyckeln borde fungera");
-        assert!(status.usage >= 0.0);
+        let status: ServiceStatus = client
+            .service_status()
+            .await
+            .expect("tjänstens läge borde gå att läsa");
+        assert!(status.credits_left >= 0.0);
+        assert!(
+            !status.fallback_models.is_empty(),
+            "tjänsten borde ha minst en gratismodell"
+        );
 
         let models = client
             .list_models()
@@ -595,13 +736,13 @@ mod tests {
             let model = models
                 .iter()
                 .find(|model| model.id == id)
-                .unwrap_or_else(|| panic!("{id} finns inte hos OpenRouter"));
+                .unwrap_or_else(|| panic!("{id} finns inte i modellistan"));
             assert!(model.context_length > 0, "{id} saknar kontextlängd");
         }
     }
 
     #[tokio::test]
-    #[ignore = "gör riktiga anrop mot OpenRouter – kör med: cargo test -- --ignored"]
+    #[ignore = "gör riktiga anrop mot AI-tjänsten – kör med: cargo test -- --ignored"]
     async fn live_streams_a_swedish_answer() {
         let client = live_client();
 
@@ -626,11 +767,63 @@ mod tests {
         );
         assert!(!usage.truncated, "svaret kapades av tokenbudgeten");
         assert!(usage.completion_tokens > 0);
-        assert_eq!(usage.model, config::MAIN_MODEL);
+
+        // Svaret kommer från den valda modellen – eller, när kontot inte kan
+        // använda den, från en gratismodell som tjänsten valt. Aldrig från
+        // något annat.
+        match usage.fallback.as_deref() {
+            Some(free) => assert!(free.ends_with(":free"), "okänd reservmodell: {free}"),
+            None => assert_eq!(usage.model, config::MAIN_MODEL),
+        }
+    }
+
+    /// Hela reservvägen: kontot kan inte använda betalmodellerna, och eleven
+    /// ska ändå få ett svar.
+    #[tokio::test]
+    #[ignore = "gör riktiga anrop mot AI-tjänsten – kör med: cargo test -- --ignored"]
+    async fn live_answers_with_a_free_model_when_credits_are_out() {
+        let client = live_client();
+
+        let status = client.service_status().await.expect("läget borde gå att läsa");
+        if status.credits_ok {
+            // Kontot har krediter. Då finns inget att falla tillbaka från, och
+            // testet säger det i stället för att påstå något det inte sett.
+            eprintln!("kontot har krediter – reservvägen provas inte här");
+            return;
+        }
+
+        let messages = crate::chat::build_messages(
+            &[ChatMessage::user("Varför är himlen blå? Svara kort.")],
+            None,
+        );
+
+        let mut answer = String::new();
+        let usage = client
+            .stream_chat(&messages, config::MAIN_MODEL, 300, |chunk| {
+                answer.push_str(chunk)
+            })
+            .await
+            .expect("anropet borde lyckas med en gratismodell");
+
+        let fallback = usage
+            .fallback
+            .as_deref()
+            .expect("svaret borde komma från en gratismodell");
+
+        assert!(
+            status.fallback_models.iter().any(|model| model == fallback),
+            "reservmodellen {fallback} finns inte bland tjänstens modeller"
+        );
+        assert!(!answer.trim().is_empty(), "svaret var tomt");
+        assert!(
+            answer.chars().count() > 40,
+            "svaret var för kort: {} tecken",
+            answer.chars().count()
+        );
     }
 
     #[tokio::test]
-    #[ignore = "gör riktiga anrop mot OpenRouter – kör med: cargo test -- --ignored"]
+    #[ignore = "gör riktiga anrop mot AI-tjänsten – kör med: cargo test -- --ignored"]
     async fn live_creates_a_quiz_that_passes_validation() {
         let client = live_client();
 
@@ -668,22 +861,27 @@ mod tests {
             assert!(!question["explanation"].as_str().unwrap().is_empty());
         }
 
-        assert!(usage.cost.unwrap_or(0.0) > 0.0, "kostnaden rapporterades inte");
+        // En gratismodell kostar ingenting, och då rapporteras ingen kostnad.
+        assert!(
+            usage.fallback.is_some() || usage.cost.unwrap_or(0.0) > 0.0,
+            "kostnaden rapporterades inte"
+        );
     }
 
     #[tokio::test]
-    #[ignore = "gör riktiga anrop mot OpenRouter – kör med: cargo test -- --ignored"]
-    async fn live_rejects_a_key_that_does_not_exist() {
-        let broken = "sk-or-v1-000000000000000000000000000000000000000000000000";
-        let client = OpenRouterClient::new(Some(broken.to_string())).unwrap();
+    #[ignore = "gör riktiga anrop mot AI-tjänsten – kör med: cargo test -- --ignored"]
+    async fn live_rejects_a_client_that_is_not_lumis_app() {
+        let (url, _, _) = crate::commands::gateway_config();
+        let client = OpenRouterClient::new(&url, "en-markering-som-inte-finns")
+            .unwrap()
+            .for_account("lumi-live-test");
 
         let error = client
-            .key_status()
+            .service_status()
             .await
-            .expect_err("en påhittad nyckel borde avvisas");
+            .expect_err("en påhittad markering borde avvisas");
 
         assert_eq!(error.kind(), "unauthorized", "fick fel: {error}");
-        assert!(!error.to_string().contains(broken));
-        assert!(!error.is_transient(), "en felaktig nyckel ska inte försökas igen");
+        assert!(!error.is_transient(), "en felaktig markering ska inte försökas igen");
     }
 }

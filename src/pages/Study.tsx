@@ -13,6 +13,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
+import AiNotice from "../components/AiNotice";
 import {
   createMaterial,
   deleteStudyMaterial,
@@ -592,6 +593,8 @@ export default function Study() {
           Skapa nytt
         </button>
       </header>
+
+      <AiNotice />
 
       {error && <div className="notice notice--error">{error}</div>}
       {notice && <div className="notice notice--ok">{notice}</div>}

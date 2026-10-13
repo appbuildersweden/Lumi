@@ -72,13 +72,13 @@ export const PRIMARY_NAV: NavItem[] = [
   {
     id: "info",
     label: "Information",
-    description: "Information om Lumi och hur appen fungerar.",
+    description: "Nyheter och information från skolan.",
     icon: Info,
   },
   {
     id: "messages",
     label: "Meddelanden",
-    description: "Dina meddelanden samlas här.",
+    description: "Viktiga meddelanden från skolan samlas här.",
     icon: Mail,
   },
 ];

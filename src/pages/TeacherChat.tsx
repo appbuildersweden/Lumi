@@ -8,6 +8,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import AiNotice from "../components/AiNotice";
 import RichText from "../components/RichText";
 import {
   askLumi,
@@ -82,7 +83,11 @@ export default function TeacherChat() {
   const [streaming, setStreaming] = useState(false);
   const [streamedText, setStreamedText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [lastUsage, setLastUsage] = useState<{ model: string; cost: number | null } | null>(null);
+  const [lastUsage, setLastUsage] = useState<{
+    model: string;
+    cost: number | null;
+    fallback: string | null;
+  } | null>(null);
 
   const [materials, setMaterials] = useState<StudyMaterial[]>([]);
   const [contextId, setContextId] = useState("");
@@ -164,7 +169,11 @@ export default function TeacherChat() {
       });
 
       const answer = bufferRef.current.trim();
-      setLastUsage({ model: usage.model, cost: usage.cost });
+      setLastUsage({
+        model: usage.model,
+        cost: usage.cost,
+        fallback: usage.fallback,
+      });
 
       if (!answer) {
         setError("AI:n skickade inget svar. Försök igen.");
@@ -315,6 +324,8 @@ export default function TeacherChat() {
         </div>
       )}
 
+      <AiNotice fallback={lastUsage?.fallback ?? null} />
+
       {error && (
         <div className="notice notice--error">
           <span>{error}</span>
@@ -457,6 +468,8 @@ export default function TeacherChat() {
       </form>
 
       {lastUsage && (
+        // Modellnamnet visas alltid: svarar en gratismodell står det här också.
+
         <p className="chat-usage">
           Svar från {lastUsage.model}
           {formatCost(lastUsage.cost) ? ` · ${formatCost(lastUsage.cost)}` : ""}

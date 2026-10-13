@@ -3,10 +3,10 @@ import AdminApp from "./admin/AdminApp";
 import BackendNotice from "./components/BackendNotice";
 import ScrollCue from "./components/ScrollCue";
 import Sidebar from "./components/Sidebar";
-import { NAV_ITEMS, type ViewId } from "./navigation";
+import type { ViewId } from "./navigation";
+import Announcements from "./pages/Announcements";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
-import PlaceholderPage from "./pages/PlaceholderPage";
 import Profile from "./pages/Profile";
 import Progress from "./pages/Progress";
 import Schedule from "./pages/Schedule";
@@ -31,9 +31,6 @@ export default function App() {
     percent: number | null;
   } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-
-  const activeItem =
-    NAV_ITEMS.find((item) => item.id === activeView) ?? NAV_ITEMS[0];
 
   // Frågar backend vem som är inloggad. Först om en sparad session finns
   // ("Håll mig inloggad"), annars om någon är inloggad i den här körningen.
@@ -169,15 +166,9 @@ export default function App() {
 
           {activeView === "profile" && <Profile user={user} />}
 
-          {(activeView === "info" || activeView === "messages") && (
-            <PlaceholderPage
-              title={activeItem.label}
-              description={activeItem.description}
-              icon={activeItem.icon}
-              note={activeItem.emptyTitle}
-              hint={activeItem.emptyHint}
-            />
-          )}
+          {activeView === "info" && <Announcements kind="nyhet" />}
+
+          {activeView === "messages" && <Announcements kind="meddelande" />}
         </div>
 
         {/* Chatten har sin egen skrollist, så där behövs ingen indikator. */}

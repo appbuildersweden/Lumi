@@ -9,9 +9,7 @@ use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error(
-        "Lumi har ingen OpenRouter-nyckel. Lägg in OPENROUTER_API_KEY i Windows miljövariabler och starta om Lumi."
-    )]
+    #[error("Lumi är inte kopplad till AI-tjänsten. Kontakta din administratör.")]
     MissingApiKey,
 
     #[error("Fel e-postadress eller lösenord.")]
@@ -32,22 +30,22 @@ pub enum AppError {
     #[error("Det finns redan ett konto med den e-postadressen.")]
     EmailTaken,
 
-    #[error("OpenRouter underkände API-nyckeln. Kontrollera att den är giltig och aktiv.")]
+    #[error("AI-tjänsten avvisade anropet. Uppdatera Lumi och försök igen.")]
     Unauthorized,
 
-    #[error("Krediten hos OpenRouter är slut. Fyll på hos OpenRouter eller byt nyckel.")]
+    #[error("AI-tjänsten kan inte använda någon modell just nu. Försök igen om en liten stund.")]
     InsufficientCredits,
 
     #[error("För många anrop just nu. Vänta en liten stund och försök igen.")]
     RateLimited,
 
-    #[error("Kunde inte nå OpenRouter. Kontrollera internetanslutningen och försök igen.")]
+    #[error("Kunde inte nå AI-tjänsten. Kontrollera internetanslutningen och försök igen.")]
     Network(String),
 
     #[error("Modellen kunde inte användas: {0}")]
     Model(String),
 
-    #[error("OpenRouter svarade med fel {status}: {message}")]
+    #[error("AI-tjänsten svarade med fel {status}: {message}")]
     Api { status: u16, message: String },
 
     #[error("AI:n svarade i ett format som Lumi inte kunde läsa. Försök igen.")]

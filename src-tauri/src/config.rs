@@ -67,14 +67,34 @@ pub const DEFAULT_MODEL: &str = MAIN_MODEL;
 /// Modeller som erbjuds i Profil vid sidan av den valda.
 pub const SUGGESTED_MODELS: &[&str] = &[MAIN_MODEL, ECONOMY_MODEL, BACKUP_MODEL];
 
-// ── API ───────────────────────────────────────────────────────────────────
+// ── AI-tjänsten ───────────────────────────────────────────────────────────
+//
+// Appen anropar Lumis egen AI-tjänst i stället för OpenRouter direkt. Tjänsten
+// ligger på Cloudflare och håller OpenRouters nyckel som en hemlighet på
+// servern. Nyckeln finns alltså inte i appen, inte i installationsfilen och
+// inte i det här repot – det är hela poängen med tjänsten.
+//
+// Markeringen nedan är inte en nyckel: den visar bara att anropet kommer från
+// Lumis app, kan läsas ut av den som har appen och kan bytas genom att
+// uppdatera hemligheten hos tjänsten och ge ut en ny version. Den riktiga
+// hemligheten – OpenRouters nyckel – finns bara hos tjänsten.
+//
+// Källkoden ligger i `ai-proxy/`.
 
-pub const API_BASE_URL: &str = "https://openrouter.ai/api/v1";
-pub const CHAT_PATH: &str = "/chat/completions";
-pub const MODELS_PATH: &str = "/models";
-pub const KEY_PATH: &str = "/key";
+/// Adressen till AI-tjänsten. Kan bytas med `LUMI_AI_URL` under utveckling.
+pub const GATEWAY_URL: &str = "https://lumi-ai.hoby123456-123.workers.dev";
 
-/// OpenRouter rekommenderar dessa headers så att anropet går att identifiera.
+/// Markeringen som skickas med varje anrop. Kan bytas med `LUMI_AI_TOKEN`.
+pub const GATEWAY_TOKEN: &str = "5edef33fd70f6bd840730eb9ed173887389a38d6065224588e1b6827095118b7";
+
+pub const GATEWAY_URL_ENV: &str = "LUMI_AI_URL";
+pub const GATEWAY_TOKEN_ENV: &str = "LUMI_AI_TOKEN";
+
+pub const CHAT_PATH: &str = "/v1/chat/completions";
+pub const MODELS_PATH: &str = "/v1/models";
+pub const STATUS_PATH: &str = "/v1/status";
+
+/// Namnet appen uppger för tjänsten, som skickar det vidare till OpenRouter.
 pub const APP_TITLE: &str = "Lumi";
 pub const APP_REFERER: &str = "https://lumi.local";
 
@@ -107,5 +127,4 @@ pub const RETRY_BASE_DELAY_MS: u64 = 700;
 // att kommandona inte loopar kring reservanropet, till skillnad från
 // `with_retry` som är byggd för att försöka flera gånger.
 
-/// Miljövariabeln som nyckeln läses från.
-pub const API_KEY_ENV: &str = "OPENROUTER_API_KEY";
+

@@ -1,11 +1,14 @@
-import { CalendarDays, TrendingUp } from "lucide-react";
+import { CalendarDays, Megaphone, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   formatDate,
+  isMissingBackend,
   listAttempts,
   listStudyMaterial,
+  myAdminMessages,
   runningInTauri,
   toLumiError,
+  type AdminMessage,
   type Attempt,
   type MaterialKind,
   type StudyMaterial,
@@ -37,6 +40,7 @@ export default function Home({ onNavigate }: HomeProps) {
   const [now, setNow] = useState(() => new Date());
   const [materials, setMaterials] = useState<StudyMaterial[]>([]);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
+  const [messages, setMessages] = useState<AdminMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Uppdaterar hälsningen om appen står öppen över ett tidsgräns.
@@ -49,14 +53,15 @@ export default function Home({ onNavigate }: HomeProps) {
     if (!runningInTauri) return undefined;
     let active = true;
 
-    Promise.all([listStudyMaterial(), listAttempts()])
-      .then(([savedMaterials, savedAttempts]) => {
+    Promise.all([listStudyMaterial(), listAttempts(), myAdminMessages()])
+      .then(([savedMaterials, savedAttempts, fromSchool]) => {
         if (!active) return;
         setMaterials(savedMaterials);
         setAttempts(savedAttempts);
+        setMessages(fromSchool);
       })
       .catch((raw) => {
-        if (active) setError(toLumiError(raw).message);
+        if (active && !isMissingBackend(raw)) setError(toLumiError(raw).message);
       });
 
     return () => {
@@ -82,6 +87,12 @@ export default function Home({ onNavigate }: HomeProps) {
     [materials]
   );
 
+  /** Skolans senaste information och meddelanden, nyaste först. */
+  const fromSchool = useMemo(
+    () => [...messages].sort((a, b) => b.createdAtMs - a.createdAtMs).slice(0, 2),
+    [messages]
+  );
+
   return (
     <>
       {/* Bannern ligger längst upp i huvudytan och når ända ut till
@@ -104,6 +115,42 @@ export default function Home({ onNavigate }: HomeProps) {
 
       <div className="home">
         {error && <div className="notice notice--error">{error}</div>}
+
+        <section className="panel" aria-labelledby="from-school-title">
+          <div className="panel__head">
+            <h2 className="panel__title" id="from-school-title">
+              <Megaphone className="panel__icon" size={18} strokeWidth={2.1} aria-hidden />
+              Från skolan
+            </h2>
+            <button
+              type="button"
+              className="link-inline"
+              onClick={() => onNavigate("info")}
+            >
+              visa allt
+            </button>
+          </div>
+
+          {fromSchool.length === 0 ? (
+            <p className="panel__text">
+              Här visas nyheter och viktiga meddelanden från skolan.
+            </p>
+          ) : (
+            <ul className="updates">
+              {fromSchool.map((message) => (
+                <li key={message.id} className="updates__item">
+                  <span className="updates__title">
+                    {message.kind === "meddelande" ? "Viktigt: " : ""}
+                    {message.title}
+                  </span>
+                  <span className="updates__meta">
+                    {message.body} · {formatDate(message.createdAtMs)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <section className="panel" aria-labelledby="updates-title">
           <div className="panel__head">

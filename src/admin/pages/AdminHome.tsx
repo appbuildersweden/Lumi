@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { CalendarDays, ListChecks, Megaphone, Plus } from "lucide-react";
-import { deleteAdminMessage, formatDate, saveAdminMessage } from "../../lib/backend";
+import {
+  deleteAdminMessage,
+  formatDate,
+  saveAdminMessage,
+  type Audience,
+} from "../../lib/backend";
 import MonthCalendar from "../MonthCalendar";
 import { WEEKDAY_SHORT, weekdaysWithEntries } from "../calendar";
 import { isoWeek, isoWeekday, longDate, weekdayLabel, weekdayName } from "../derive";
@@ -38,6 +43,7 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
   const [publishing, setPublishing] = useState(false);
   const [showAllUpdates, setShowAllUpdates] = useState(false);
   const [kind, setKind] = useState("nyhet");
+  const [audience, setAudience] = useState<Audience>("alla");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
 
@@ -76,6 +82,7 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
           body,
           createdAtMs: 0,
           authorName: user.displayName,
+          audience,
         }),
       kind === "nyhet" ? "Nyheten publicerades." : "Meddelandet publicerades."
     );
@@ -83,6 +90,7 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
     if (ok) {
       setTitle("");
       setBody("");
+      setAudience("alla");
       setPublishing(false);
     }
   }
@@ -227,6 +235,11 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
                           <Tag tone={message.kind === "meddelande" ? "warn" : "info"}>
                             {message.kind === "meddelande" ? "Meddelande" : "Nyhet"}
                           </Tag>
+                          {message.audience !== "alla" && (
+                            <Tag tone="muted">
+                              {message.audience === "elever" ? "Elever" : "Lärare"}
+                            </Tag>
+                          )}
                         </span>
                         <span className="compact-list__meta clamp-2">
                           {message.body} · {formatDate(message.createdAtMs)}
@@ -274,6 +287,20 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
                     </select>
                   </label>
                   <label className="field">
+                    <span>Mottagare</span>
+                    <select
+                      value={audience}
+                      onChange={(event) => setAudience(event.target.value as Audience)}
+                    >
+                      <option value="alla">Alla</option>
+                      <option value="elever">Elever</option>
+                      <option value="lärare">Lärare</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="field-grid">
+                  <label className="field field--wide">
                     <span>Rubrik</span>
                     <input
                       value={title}

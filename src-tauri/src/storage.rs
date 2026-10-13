@@ -354,6 +354,39 @@ impl HasId for ScheduleEntry {
     }
 }
 
+/// Vilka som får läsa en nyhet eller ett meddelande: alla, eleverna eller
+/// lärarna. Äldre poster saknar fältet och gäller alla.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Audience {
+    #[serde(rename = "alla", alias = "", alias = "all")]
+    Everyone,
+    #[serde(rename = "elever", alias = "elev", alias = "student")]
+    Students,
+    #[serde(rename = "lärare", alias = "larare", alias = "teacher")]
+    Teachers,
+}
+
+impl Default for Audience {
+    fn default() -> Self {
+        Audience::Everyone
+    }
+}
+
+impl Audience {
+    /// Sant när en inloggad roll får läsa posten. Administratören ser allt.
+    pub fn includes(self, role: Role) -> bool {
+        if role.is_admin() {
+            return true;
+        }
+
+        match self {
+            Audience::Everyone => true,
+            Audience::Students => role == Role::Student,
+            Audience::Teachers => role.is_teacher(),
+        }
+    }
+}
+
 /// En nyhet eller ett viktigt meddelande som visas på adminens startsida.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -366,6 +399,16 @@ pub struct AdminMessage {
     pub created_at_ms: u64,
     #[serde(default)]
     pub author_name: String,
+    /// Vilka posten är riktad till. Saknas i äldre poster och betyder då alla.
+    #[serde(default)]
+    pub audience: Audience,
+}
+
+impl AdminMessage {
+    /// Sant när den här rollen får läsa posten.
+    pub fn visible_to(&self, role: Role) -> bool {
+        self.audience.includes(role)
+    }
 }
 
 impl HasId for AdminMessage {

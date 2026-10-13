@@ -1,8 +1,9 @@
 // Lumi – Tauri-startpunkt.
 //
 // Del 1 var enbart frontend. Nu finns också AI-läraren, studiematerialet och
-// den lokala lagringen på plats. Allt som rör API-nyckeln och nätverket sker
-// i Rust; gränssnittet når aldrig nyckeln.
+// den lokala lagringen på plats. Allt som rör AI-tjänsten och nätverket sker
+// i Rust. Någon OpenRouter-nyckel finns inte i appen: den ligger som en
+// hemlighet hos Lumis egen AI-tjänst (se `ai-proxy/`).
 
 mod auth;
 mod chat;
@@ -58,7 +59,7 @@ pub fn run() {
         .setup(|app| {
             let directory = commands::storage_dir(app.handle())?;
             let storage = Storage::new(directory)?;
-            let (api_key, _) = commands::resolve_api_key();
+            let (gateway_url, gateway_token, _) = commands::gateway_config();
 
             // Administratörskontot skapas från miljövariablerna första gången
             // appen startar. Lösenordet blir en hash direkt och skrivs aldrig
@@ -88,7 +89,7 @@ pub fn run() {
 
             app.manage(AppState {
                 storage,
-                client: OpenRouterClient::new(api_key)?,
+                client: OpenRouterClient::new(&gateway_url, &gateway_token)?,
                 models: tokio::sync::Mutex::new(None),
                 session: std::sync::Mutex::new(None),
                 session_dir: commands::session_dir(app.handle())?,
@@ -175,6 +176,7 @@ pub fn run() {
             commands::save_schedule_entry,
             commands::delete_schedule_entry,
             commands::list_admin_messages,
+            commands::my_admin_messages,
             commands::save_admin_message,
             commands::delete_admin_message,
             commands::list_activity,
