@@ -40,6 +40,9 @@ pub struct PublicUser {
     pub active: bool,
     /// Personen kontot hör till, om det är kopplat.
     pub person_id: Option<String>,
+    /// Vad rollen får göra, enligt backend. Gränssnittet visar bara det som
+    /// står här i stället för att gissa utifrån rollnamnet.
+    pub permissions: Vec<String>,
 }
 
 impl User {
@@ -53,6 +56,12 @@ impl User {
             role_label: self.role.label().to_string(),
             active: self.active,
             person_id: self.person_id.clone(),
+            permissions: self
+                .role
+                .permissions()
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
         }
     }
 }
@@ -851,6 +860,7 @@ mod tests {
             role_label: Role::Admin.label().to_string(),
             active: true,
             person_id: None,
+            permissions: vec!["info.publish".to_string(), "info.manage".to_string()],
         };
 
         let json = serde_json::to_value(&user).unwrap();
@@ -858,6 +868,7 @@ mod tests {
         assert_eq!(json["displayName"], "Administratör");
         assert_eq!(json["roleLabel"], "Administratör");
         assert_eq!(json["active"], true);
+        assert_eq!(json["permissions"][0], "info.publish");
     }
 
     #[test]

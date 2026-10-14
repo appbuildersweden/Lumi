@@ -166,9 +166,11 @@ export default function App() {
 
           {activeView === "profile" && <Profile user={user} />}
 
-          {activeView === "info" && <Announcements kind="nyhet" />}
+          {activeView === "info" && <Announcements kind="nyhet" user={user} />}
 
-          {activeView === "messages" && <Announcements kind="meddelande" />}
+          {activeView === "messages" && (
+            <Announcements kind="meddelande" user={user} />
+          )}
         </div>
 
         {/* Chatten har sin egen skrollist, så där behövs ingen indikator. */}

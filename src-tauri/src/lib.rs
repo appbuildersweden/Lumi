@@ -176,6 +176,8 @@ pub fn run() {
             commands::save_schedule_entry,
             commands::delete_schedule_entry,
             commands::list_admin_messages,
+            commands::list_classes,
+            commands::list_info_recipients,
             commands::my_admin_messages,
             commands::save_admin_message,
             commands::delete_admin_message,

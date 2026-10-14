@@ -89,6 +89,11 @@ export interface PublicUser {
   roleLabel: string;
   active: boolean;
   personId: string | null;
+  /**
+   * Vad rollen får göra, enligt backend. Gränssnittet visar bara det som står
+   * här i stället för att gissa utifrån rollnamnet.
+   */
+  permissions: string[];
 }
 
 /** En person i skolan. Kopplas till ett konto. */
@@ -196,7 +201,10 @@ export interface ScheduleEntry {
 }
 
 /** Vilka som ser en nyhet eller ett meddelande. */
-export type Audience = "alla" | "elever" | "lärare";
+export type Audience = "alla" | "elever" | "lärare" | "klass" | "grupp";
+
+/** Hur viktig en post är. */
+export type Priority = "normal" | "viktig" | "akut";
 
 /** En nyhet eller ett viktigt meddelande. */
 export interface AdminMessage {
@@ -207,8 +215,22 @@ export interface AdminMessage {
   body: string;
   createdAtMs: number;
   authorName: string;
+  /** Kontot som publicerade posten. Sätts av backend ur sessionen. */
+  authorId: string;
   /** Vem posten är riktad till. Backend svarar alltid med ett värde. */
   audience: Audience;
+  /** Klasserna posten gäller när mottagaren är "klass". */
+  classNames: string[];
+  /** Person-id för de elever posten gäller när mottagaren är "grupp". */
+  studentIds: string[];
+  priority: Priority;
+}
+
+/** En elev som information kan riktas till i en grupp. */
+export interface InfoRecipient {
+  id: string;
+  name: string;
+  className: string;
 }
 
 /** Hur mottagarna skrivs i gränssnittet. */
@@ -216,6 +238,22 @@ export const AUDIENCE_LABELS: Record<Audience, string> = {
   alla: "Alla",
   elever: "Elever",
   "lärare": "Lärare",
+  klass: "Klass",
+  grupp: "Grupp",
+};
+
+/** Hur vikten skrivs i gränssnittet. */
+export const PRIORITY_LABELS: Record<Priority, string> = {
+  normal: "Normal",
+  viktig: "Viktig",
+  akut: "Akut",
+};
+
+/** Ordningen när posterna sorteras: det akuta först. */
+export const PRIORITY_RANK: Record<Priority, number> = {
+  normal: 0,
+  viktig: 1,
+  akut: 2,
 };
 
 export interface ActivityEntry {
@@ -712,6 +750,19 @@ export function landsInAdminPanel(user: PublicUser | null | undefined): boolean 
   return user?.role === "admin";
 }
 
+/**
+ * Sant när kontot får publicera skolans information. Behörigheten kommer från
+ * backend; gränssnittet hittar inte på en egen.
+ */
+export function canPublishInfo(user: PublicUser | null | undefined): boolean {
+  return user?.permissions?.includes("info.publish") ?? false;
+}
+
+/** Sant när kontot får ändra och ta bort även andras poster. */
+export function canManageInfo(user: PublicUser | null | undefined): boolean {
+  return user?.permissions?.includes("info.manage") ?? false;
+}
+
 // ── Adminpanelen ─────────────────────────────────────────────────────────
 //
 // Alla anrop nedan kräver ett inloggat administratörskonto. Backend svarar
@@ -823,6 +874,16 @@ export function deleteScheduleEntry(id: string): Promise<void> {
 
 export function listAdminMessages(): Promise<AdminMessage[]> {
   return call<AdminMessage[]>("list_admin_messages");
+}
+
+/** Klasserna som finns i personregistret. Kräver behörighet att publicera. */
+export function listClasses(): Promise<string[]> {
+  return call<string[]>("list_classes");
+}
+
+/** Eleverna att välja mellan när information riktas till en grupp. */
+export function listInfoRecipients(): Promise<InfoRecipient[]> {
+  return call<InfoRecipient[]>("list_info_recipients");
 }
 
 /**

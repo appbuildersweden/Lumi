@@ -19,8 +19,8 @@ use crate::materials::{self, GenerateRequest};
 use crate::openrouter::{ChatMessage, ChatUsage, ModelInfo, OpenRouterClient, ServiceStatus};
 use crate::session;
 use crate::storage::{
-    now_ms, ActivityEntry, AdminMessage, Assignment, Attempt, Exam, ExamResult, Person, Role,
-    ScheduleEntry, Settings, Storage, StudyMaterial, Submission,
+    now_ms, same_class, ActivityEntry, AdminMessage, Assignment, Attempt, Audience, Exam,
+    ExamResult, Person, ScheduleEntry, Settings, Storage, StudyMaterial, Submission,
 };
 
 pub struct AppState {
@@ -747,6 +747,8 @@ pub fn list_roles(state: State<'_, AppState>) -> Result<Vec<RoleInfo>, AppError>
             "Lumis elevgränssnitt",
             &[
                 "Använda AI-läraren och Plugga",
+                "Publicera information till elever och klasser",
+                "Ändra och ta bort sina egna informationsposter",
                 "Se sina egna elever när lärargränssnittet är klart",
             ],
         ),
@@ -756,6 +758,7 @@ pub fn list_roles(state: State<'_, AppState>) -> Result<Vec<RoleInfo>, AppError>
             "Studerar med AI-läraren, Plugga och sitt schema.",
             "Lumis startsida",
             &[
+                "Läsa information som gäller eleven och elevens klass",
                 "Använda AI-läraren och Plugga",
                 "Se sitt eget schema och sina resultat",
             ],
@@ -1245,32 +1248,251 @@ pub fn delete_schedule_entry(state: State<'_, AppState>, id: String) -> Result<(
 
 // -- Nyheter, meddelanden och aktivitetslogg ------------------------------
 
-#[tauri::command]
-pub fn list_admin_messages(state: State<'_, AppState>) -> Result<Vec<AdminMessage>, AppError> {
-    require_admin(&state)?;
-    state.storage.admin_messages()
+/// Kräver ett konto som får publicera information.
+///
+/// Behörigheten kommer från rollen i databasen – administratören och läraren
+/// får publicera, eleven aldrig. Ingen kontroll sker i gränssnittet.
+fn require_publisher(state: &AppState) -> Result<PublicUser, AppError> {
+    let user = require_session(state)?;
+    if user.role.can_publish_info() {
+        Ok(user)
+    } else {
+        Err(AppError::NotAllowed)
+    }
 }
 
-/// Nyheterna som en roll får läsa. Regeln ligger utanför kommandot så att den
+/// Sant när kontot får ändra eller ta bort en post som någon annan lade upp.
+/// Administratören får allt; en lärare bara sina egna poster.
+fn may_edit(actor: &PublicUser, author_id: &str) -> bool {
+    actor.role.can_manage_info()
+        || (!author_id.trim().is_empty() && author_id == actor.id)
+}
+
+/// Personen kontot hör till, om det är kopplat. Klassen och grupptillhörigheten
+/// hämtas härifrån – gränssnittet kan aldrig skicka in ett eget namn eller id.
+fn person_of(storage: &Storage, user: &PublicUser) -> Option<Person> {
+    user.person_id
+        .as_deref()
+        .filter(|id| !id.trim().is_empty())
+        .and_then(|id| storage.person(id).ok().flatten())
+}
+
+/// Klassen den inloggade går i, hämtad ur personregistret via kontots
+/// person-id. Tom när kontot inte är kopplat till en elev.
+fn class_of(storage: &Storage, user: &PublicUser) -> String {
+    person_of(storage, user)
+        .map(|person| person.class_name)
+        .unwrap_or_default()
+}
+
+/// Klasserna en lärare undervisar i, enligt skolans schema. Det är den enda
+/// kopplingen mellan en lärare och en klass som finns i Lumi.
+fn teacher_classes(storage: &Storage, person_id: &str) -> Vec<String> {
+    let mut classes: Vec<String> = Vec::new();
+    if person_id.trim().is_empty() {
+        return classes;
+    }
+
+    for entry in storage.schedule().unwrap_or_default() {
+        if entry.teacher_id != person_id {
+            continue;
+        }
+
+        let name = entry.class_name.trim();
+        if name.is_empty() || classes.iter().any(|kept| same_class(kept, name)) {
+            continue;
+        }
+        classes.push(name.to_string());
+    }
+
+    classes.sort();
+    classes
+}
+
+/// Vad den inloggade får rikta information till.
+///
+/// Administratören når hela skolan. En lärare når sina egna klasser och de
+/// elever som går i dem, aldrig någon annans. Urvalet byggs ur skolans data,
+/// så en behörighet kan inte hittas på i gränssnittet.
+struct InfoScope {
+    /// Klasserna kontot får skicka till.
+    classes: Vec<String>,
+    /// Eleverna kontot får skicka till, som person-id.
+    student_ids: Vec<String>,
+    /// Sant för administratören: hela skolan, alla elever och personalen.
+    everyone: bool,
+}
+
+impl InfoScope {
+    fn build(storage: &Storage, actor: &PublicUser) -> Self {
+        let students: Vec<Person> = storage
+            .people()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|person| person.is_student() && person.active)
+            .collect();
+
+        if actor.role.can_manage_info() {
+            let mut classes: Vec<String> = Vec::new();
+            for person in &students {
+                let name = person.class_name.trim();
+                if name.is_empty() || classes.iter().any(|kept| same_class(kept, name)) {
+                    continue;
+                }
+                classes.push(name.to_string());
+            }
+            classes.sort();
+
+            return InfoScope {
+                classes,
+                student_ids: students.iter().map(|person| person.id.clone()).collect(),
+                everyone: true,
+            };
+        }
+
+        let person_id = actor.person_id.clone().unwrap_or_default();
+        let classes = teacher_classes(storage, &person_id);
+        let student_ids = students
+            .iter()
+            .filter(|person| {
+                classes
+                    .iter()
+                    .any(|kept| same_class(kept, &person.class_name))
+            })
+            .map(|person| person.id.clone())
+            .collect();
+
+        InfoScope {
+            classes,
+            student_ids,
+            everyone: false,
+        }
+    }
+
+    /// Sant när postens mottagare ligger inom det kontot får nå.
+    fn may_reach(&self, audience: Audience, class_names: &[String], student_ids: &[String]) -> bool {
+        match audience {
+            // Rollen avgör redan dessa; hit kommer bara den som får alla.
+            Audience::Everyone | Audience::Students | Audience::Teachers => self.everyone,
+            Audience::Classes => class_names
+                .iter()
+                .all(|name| self.classes.iter().any(|kept| same_class(kept, name))),
+            Audience::Group => student_ids
+                .iter()
+                .all(|id| self.student_ids.iter().any(|known| known == id)),
+        }
+    }
+}
+
+/// Klassnamnen städade: trimmade, utan tomma rader och utan dubbletter.
+fn normalized_class_names(names: &[String]) -> Vec<String> {
+    let mut cleaned: Vec<String> = Vec::new();
+    for name in names {
+        let trimmed = name.trim();
+        if trimmed.is_empty() || cleaned.iter().any(|kept| same_class(kept, trimmed)) {
+            continue;
+        }
+        cleaned.push(trimmed.to_string());
+    }
+    cleaned
+}
+
+/// Person-id:na städade på samma sätt: trimmade, utan tomma rader och utan
+/// dubbletter.
+fn normalized_student_ids(ids: &[String]) -> Vec<String> {
+    let mut cleaned: Vec<String> = Vec::new();
+    for id in ids {
+        let trimmed = id.trim();
+        if trimmed.is_empty() || cleaned.iter().any(|kept| kept == trimmed) {
+            continue;
+        }
+        cleaned.push(trimmed.to_string());
+    }
+    cleaned
+}
+
+/// Posterna en inloggad får läsa. Regeln ligger utanför kommandot så att den
 /// går att köra i test utan att starta ett appfönster.
-fn messages_for_role(state: &AppState, role: Role) -> Result<Vec<AdminMessage>, AppError> {
+fn messages_for_user(state: &AppState, user: &PublicUser) -> Result<Vec<AdminMessage>, AppError> {
+    let class_name = class_of(&state.storage, user);
+    let person_id = user.person_id.clone().unwrap_or_default();
+
     Ok(state
         .storage
         .admin_messages()?
         .into_iter()
-        .filter(|message| message.visible_to(role))
+        .filter(|message| message.visible_to(user.role, &class_name, &person_id))
         .collect())
+}
+
+/// Alla poster, för den som får publicera. Läraren ser listan för att kunna
+/// följa och rätta sina egna poster; eleven kommer aldrig hit.
+#[tauri::command]
+pub fn list_admin_messages(state: State<'_, AppState>) -> Result<Vec<AdminMessage>, AppError> {
+    require_publisher(&state)?;
+    state.storage.admin_messages()
+}
+
+/// Klasserna att välja mellan när information ska riktas till en klass.
+///
+/// Administratören ser hela skolans klasser, en lärare bara sina egna. Listan
+/// är alltså samma regel som publiceringen kontrolleras mot.
+#[tauri::command]
+pub fn list_classes(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    let actor = require_publisher(&state)?;
+    Ok(InfoScope::build(&state.storage, &actor).classes)
+}
+
+/// En elev som information kan riktas till i en grupp.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfoRecipient {
+    pub id: String,
+    pub name: String,
+    pub class_name: String,
+}
+
+/// Eleverna att välja mellan när information ska riktas till en grupp.
+///
+/// En lärare ser bara eleverna i sina egna klasser. Id:na är person-id, så
+/// mottagaren är eleven och inte kontot.
+#[tauri::command]
+pub fn list_info_recipients(state: State<'_, AppState>) -> Result<Vec<InfoRecipient>, AppError> {
+    let actor = require_publisher(&state)?;
+    let scope = InfoScope::build(&state.storage, &actor);
+
+    let mut recipients: Vec<InfoRecipient> = state
+        .storage
+        .people()?
+        .into_iter()
+        .filter(|person| {
+            person.is_student() && person.active && scope.student_ids.contains(&person.id)
+        })
+        .map(|person| InfoRecipient {
+            name: person.full_name(),
+            class_name: person.class_name.trim().to_string(),
+            id: person.id,
+        })
+        .collect();
+
+    recipients.sort_by(|a, b| {
+        a.class_name
+            .cmp(&b.class_name)
+            .then(a.name.cmp(&b.name))
+    });
+    Ok(recipients)
 }
 
 /// Nyheterna och meddelandena som den inloggade får läsa.
 ///
 /// Elev och lärare använder den här vägen i stället för adminlistan. Rollen
-/// läses ur databasen vid varje anrop och avgör vad som skickas tillbaka –
-/// gränssnittet kan inte välja bort filtret, och en gäst får ingenting alls.
+/// och klassen läses ur databasen vid varje anrop och avgör vad som skickas
+/// tillbaka – gränssnittet kan inte välja bort filtret, och en gäst får
+/// ingenting alls.
 #[tauri::command]
 pub fn my_admin_messages(state: State<'_, AppState>) -> Result<Vec<AdminMessage>, AppError> {
     let viewer = require_session(&state)?;
-    messages_for_role(&state, viewer.role)
+    messages_for_user(&state, &viewer)
 }
 
 #[tauri::command]
@@ -1278,10 +1500,29 @@ pub fn save_admin_message(
     state: State<'_, AppState>,
     message: AdminMessage,
 ) -> Result<AdminMessage, AppError> {
-    let actor = require_admin(&state)?;
+    let actor = require_publisher(&state)?;
 
     let mut message = message;
     let is_new = message.id.trim().is_empty();
+
+    // Posten som ändras, om det är en ändring. Den avgör både vem som äger
+    // posten och vem som står som publicerare.
+    let previous = if is_new {
+        None
+    } else {
+        state
+            .storage
+            .admin_messages()?
+            .into_iter()
+            .find(|item| item.id == message.id)
+    };
+
+    if let Some(previous) = &previous {
+        if !may_edit(&actor, &previous.author_id) {
+            return Err(AppError::NotAllowed);
+        }
+    }
+
     prepare(&mut message.id, &mut message.created_at_ms);
 
     message.title = require_text(&message.title, "Rubriken")?;
@@ -1295,16 +1536,69 @@ pub fn save_admin_message(
             )))
         }
     };
-    message.author_name = actor.display_name.clone();
+
+    if !actor.role.can_address(message.audience) {
+        return Err(AppError::NotAllowed);
+    }
+
+    message.class_names = normalized_class_names(&message.class_names);
+    message.student_ids = normalized_student_ids(&message.student_ids);
+
+    match message.audience {
+        Audience::Classes => {
+            if message.class_names.is_empty() {
+                return Err(AppError::Validation(
+                    "Välj minst en klass innan du publicerar.".to_string(),
+                ));
+            }
+        }
+        Audience::Group => {
+            if message.student_ids.is_empty() {
+                return Err(AppError::Validation(
+                    "Välj minst en elev innan du publicerar.".to_string(),
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    // Namnlistorna städas bort när de inte används, så en post aldrig bär
+    // mottagare som inte hör till mottagartypen.
+    if message.audience != Audience::Classes {
+        message.class_names.clear();
+    }
+    if message.audience != Audience::Group {
+        message.student_ids.clear();
+    }
+
+    // Läraren får bara nå sina egna klasser och elever. Kontrollen görs mot
+    // skolans data, inte mot något gränssnittet skickade med.
+    let scope = InfoScope::build(&state.storage, &actor);
+    if !scope.may_reach(message.audience, &message.class_names, &message.student_ids) {
+        return Err(AppError::NotAllowed);
+    }
+
+    // Publiceraren skrivs av backend ur sessionen, aldrig av gränssnittet. En
+    // ändring behåller den som lade upp posten från början.
+    match &previous {
+        Some(previous) => {
+            message.author_id = previous.author_id.clone();
+            message.author_name = previous.author_name.clone();
+        }
+        None => {
+            message.author_id = actor.id.clone();
+            message.author_name = actor.display_name.clone();
+        }
+    }
 
     state.storage.save_admin_message(&message)?;
     log_action(
         &state,
         &actor,
         if is_new {
-            "Meddelande publicerat"
+            "Information publicerad"
         } else {
-            "Meddelande ändrat"
+            "Information ändrad"
         },
         message.title.clone(),
     );
@@ -1313,9 +1607,28 @@ pub fn save_admin_message(
 
 #[tauri::command]
 pub fn delete_admin_message(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
-    let actor = require_admin(&state)?;
+    let actor = require_publisher(&state)?;
+
+    let previous = state
+        .storage
+        .admin_messages()?
+        .into_iter()
+        .find(|item| item.id == id);
+
+    if let Some(previous) = &previous {
+        // En lärare tar bort sina egna poster; administratören allt.
+        if !may_edit(&actor, &previous.author_id) {
+            return Err(AppError::NotAllowed);
+        }
+    }
+
     state.storage.remove_admin_message(&id)?;
-    log_action(&state, &actor, "Meddelande borttaget", "");
+    log_action(
+        &state,
+        &actor,
+        "Information borttagen",
+        previous.map(|item| item.title).unwrap_or_default(),
+    );
     Ok(())
 }
 
@@ -2375,18 +2688,19 @@ mod login_tests {
 
 #[cfg(test)]
 mod gate_tests {
-    use super::{
-        account_after_person_change, attempts_for, delete_material_of, ensure_person_is_unique,
-        material_of, materials_of, messages_for_role, person_after_profile_change, require_admin,
-        require_session, resolve_model, schedule_for_user, session, set_model_for, settings_for,
-        split_display_name, store_attempt, store_material, store_person, update_own_profile,
-        validate_assignment, validate_exam, validate_schedule_slot, AppState, SaveMaterialRequest,
+    use super::{        account_after_person_change, attempts_for, class_of, delete_material_of,
+        ensure_person_is_unique, material_of, materials_of, may_edit, messages_for_user,
+        normalized_class_names, normalized_student_ids, person_after_profile_change, require_admin,
+        require_publisher, require_session, resolve_model, schedule_for_user, session, set_model_for,
+        settings_for, split_display_name, store_attempt, store_material, store_person,
+        update_own_profile, validate_assignment, validate_exam, validate_schedule_slot, AppState,
+        InfoScope, SaveMaterialRequest,
     };
     use crate::auth::{create_user, login, set_active, set_person, set_role, PublicUser};
     use crate::config::ModelRole;
     use crate::openrouter::OpenRouterClient;
     use crate::storage::{
-        AdminMessage, Assignment, Audience, Exam, Person, Role, ScheduleEntry, Storage,
+        AdminMessage, Assignment, Audience, Exam, Person, Priority, Role, ScheduleEntry, Storage,
     };
 
     fn state() -> (AppState, std::path::PathBuf) {
@@ -2404,8 +2718,21 @@ mod gate_tests {
         (state, dir)
     }
 
-    /// Sparar en nyhet med en viss mottagare.
+    /// Sparar en nyhet med en viss mottagare. Publicerad av kontot `konto-1`,
+    /// vilket är samma id som `account` ger.
     fn news(state: &AppState, audience: Audience, title: &str) {
+        news_from(state, "konto-1", audience, &[], Priority::Normal, title);
+    }
+
+    /// Sparar en post med vald mottagare, klass, vikt och avsändare.
+    fn news_from(
+        state: &AppState,
+        author_id: &str,
+        audience: Audience,
+        class_names: &[&str],
+        priority: Priority,
+        title: &str,
+    ) {
         state
             .storage
             .save_admin_message(&AdminMessage {
@@ -2415,7 +2742,11 @@ mod gate_tests {
                 body: "Text".to_string(),
                 created_at_ms: 1,
                 author_name: "Administratör".to_string(),
+                author_id: author_id.to_string(),
                 audience,
+                class_names: class_names.iter().map(|name| name.to_string()).collect(),
+                student_ids: Vec::new(),
+                priority,
             })
             .expect("nyheten borde kunna sparas");
     }
@@ -2437,16 +2768,16 @@ mod gate_tests {
         news(&state, Audience::Teachers, "Lärarna");
 
         assert_eq!(
-            titles(messages_for_role(&state, Role::Student).unwrap()),
+            titles(messages_for_user(&state, &account(Role::Student)).unwrap()),
             vec!["Alla".to_string(), "Eleverna".to_string()]
         );
         assert_eq!(
-            titles(messages_for_role(&state, Role::Teacher).unwrap()),
+            titles(messages_for_user(&state, &account(Role::Teacher)).unwrap()),
             vec!["Alla".to_string(), "Lärarna".to_string()]
         );
         // Administratören ser allt, och har dessutom den egna adminlistan.
         assert_eq!(
-            titles(messages_for_role(&state, Role::Admin).unwrap()),
+            titles(messages_for_user(&state, &account(Role::Admin)).unwrap()),
             vec!["Alla".to_string(), "Eleverna".to_string(), "Lärarna".to_string()]
         );
 
@@ -2483,8 +2814,10 @@ mod gate_tests {
 
         let message: AdminMessage = serde_json::from_value(old).expect("gammal post borde gå att läsa");
         assert_eq!(message.audience, Audience::Everyone);
-        assert!(message.visible_to(Role::Student));
-        assert!(message.visible_to(Role::Teacher));
+        assert_eq!(message.priority, Priority::Normal);
+        assert!(message.class_names.is_empty());
+        assert!(message.visible_to(Role::Student, "9A", ""));
+        assert!(message.visible_to(Role::Teacher, "", ""));
     }
 
     #[test]
@@ -2497,12 +2830,354 @@ mod gate_tests {
             body: "Text".to_string(),
             created_at_ms: 1,
             author_name: "Administratör".to_string(),
+            author_id: "konto-1".to_string(),
             audience: Audience::Students,
+            class_names: vec!["9A".to_string()],
+            student_ids: Vec::new(),
+            priority: Priority::Urgent,
         })
         .unwrap();
 
         assert_eq!(status["audience"], "elever");
         assert_eq!(status["createdAtMs"], 1);
+        assert_eq!(status["priority"], "akut");
+        assert_eq!(status["classNames"][0], "9A");
+        assert_eq!(status["authorId"], "konto-1");
+    }
+
+    // ── Information till en klass ─────────────────────────────────────────
+
+    #[test]
+    fn a_class_news_item_reaches_only_the_students_in_that_class() {
+        let (state, dir) = state();
+
+        news_from(&state, "konto-1", Audience::Classes, &["8A"], Priority::Normal, "Till 8A");
+        news_from(&state, "konto-1", Audience::Students, &[], Priority::Normal, "Till alla elever");
+
+        // Eleven i 9A ser det som gäller alla elever – men inte 8A:s post.
+        let nine_a = PublicUser {
+            id: "elev-9a".to_string(),
+            person_id: Some(class_person(&state, "9A", "elever")),
+            ..account(Role::Student)
+        };
+        assert_eq!(
+            titles(messages_for_user(&state, &nine_a).unwrap()),
+            vec!["Till alla elever".to_string()]
+        );
+
+        // Eleven i 8A ser båda.
+        let eight_a = PublicUser {
+            id: "elev-8a".to_string(),
+            person_id: Some(class_person(&state, "8A", "elever")),
+            ..account(Role::Student)
+        };
+        assert_eq!(
+            titles(messages_for_user(&state, &eight_a).unwrap()),
+            vec!["Till 8A".to_string(), "Till alla elever".to_string()]
+        );
+
+        // Läraren är inte elev: poster som gäller elever eller en klass når
+        // inte lärarens informationsvy. Som publicerare ser läraren dem i
+        // stället i publiceringslistan.
+        assert!(messages_for_user(&state, &account(Role::Teacher))
+            .unwrap()
+            .is_empty());
+
+        // Administratören ser allt, som förut.
+        assert_eq!(
+            titles(messages_for_user(&state, &account(Role::Admin)).unwrap()),
+            vec!["Till 8A".to_string(), "Till alla elever".to_string()]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_student_without_a_class_never_sees_a_class_news_item() {
+        let (state, dir) = state();
+        news_from(&state, "konto-1", Audience::Classes, &["8A"], Priority::Normal, "Till 8A");
+
+        // Kontot saknar person, alltså finns ingen klass att matcha mot.
+        assert!(messages_for_user(&state, &account(Role::Student))
+            .unwrap()
+            .is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_class_comes_from_the_person_register_and_not_from_the_interface() {
+        let (state, dir) = state();
+        let person_id = class_person(&state, "9A", "elever");
+        let student = PublicUser {
+            person_id: Some(person_id.clone()),
+            ..account(Role::Student)
+        };
+
+        assert_eq!(class_of(&state.storage, &student), "9A");
+
+        // Ett konto utan person har ingen klass, och ett påhittat person-id
+        // ger ingen klass det heller.
+        assert_eq!(class_of(&state.storage, &account(Role::Student)), "");
+        let invented = PublicUser {
+            person_id: Some("finns-inte".to_string()),
+            ..account(Role::Student)
+        };
+        assert_eq!(class_of(&state.storage, &invented), "");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn student_ids_are_cleaned_and_deduplicated() {
+        let cleaned = normalized_student_ids(&[
+            " person-1 ".to_string(),
+            "person-1".to_string(),
+            "".to_string(),
+            "person-2".to_string(),
+        ]);
+        assert_eq!(cleaned, vec!["person-1".to_string(), "person-2".to_string()]);
+    }
+
+    #[test]
+    fn class_names_are_cleaned_and_deduplicated() {
+        // "9a" och " 9A " är samma klass, och tomma rader faller bort.
+        let cleaned = normalized_class_names(&[
+            " 9A ".to_string(),
+            "9a".to_string(),
+            "".to_string(),
+            "8B".to_string(),
+        ]);
+        assert_eq!(cleaned, vec!["9A".to_string(), "8B".to_string()]);
+    }
+
+    // ── Behörigheterna för information ────────────────────────────────────
+
+    #[test]
+    fn the_role_decides_who_may_publish() {
+        // Administratör och lärare får publicera, eleven aldrig.
+        assert!(Role::Admin.can_publish_info());
+        assert!(Role::Teacher.can_publish_info());
+        assert!(!Role::Student.can_publish_info());
+
+        // Bara administratören får ändra och ta bort andras poster.
+        assert!(Role::Admin.can_manage_info());
+        assert!(!Role::Teacher.can_manage_info());
+        assert!(!Role::Student.can_manage_info());
+    }
+
+    #[test]
+    fn a_teacher_reaches_classes_and_groups_but_not_the_whole_school() {
+        for audience in [Audience::Classes, Audience::Group] {
+            assert!(Role::Teacher.can_address(audience));
+            assert!(Role::Admin.can_address(audience));
+            assert!(!Role::Student.can_address(audience));
+        }
+
+        // Hela skolan, alla elever och personalen är administratörens.
+        for audience in [Audience::Everyone, Audience::Students, Audience::Teachers] {
+            assert!(Role::Admin.can_address(audience));
+            assert!(!Role::Teacher.can_address(audience));
+            assert!(!Role::Student.can_address(audience));
+        }
+    }
+
+    /// En lärare med en egen klass, kopplad via schemat.
+    fn teacher_with_class(state: &AppState, class_name: &str) -> PublicUser {
+        let person_id = class_person(state, class_name, "personal");
+        state
+            .storage
+            .save_schedule_entry(&ScheduleEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: "lektion".to_string(),
+                title: "Matematik".to_string(),
+                subject: "Matematik".to_string(),
+                class_name: class_name.to_string(),
+                weekday: 1,
+                start: "08:30".to_string(),
+                end: "09:30".to_string(),
+                room: String::new(),
+                teacher_id: person_id.clone(),
+                created_at_ms: 1,
+            })
+            .expect("schemaposten borde kunna sparas");
+
+        PublicUser {
+            id: "konto-larare".to_string(),
+            display_name: "Lärare Lind".to_string(),
+            role: Role::Teacher,
+            role_label: Role::Teacher.label().to_string(),
+            person_id: Some(person_id),
+            permissions: Role::Teacher
+                .permissions()
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
+            ..account(Role::Teacher)
+        }
+    }
+
+    #[test]
+    fn a_teacher_only_reaches_its_own_classes() {
+        let (state, dir) = state();
+        class_person(&state, "8A", "elever");
+        class_person(&state, "9A", "elever");
+        let teacher = teacher_with_class(&state, "8A");
+        let scope = InfoScope::build(&state.storage, &teacher);
+
+        assert_eq!(scope.classes, vec!["8A".to_string()]);
+        assert!(!scope.everyone);
+
+        // Den egna klassen går bra, en annan klass nekas.
+        assert!(scope.may_reach(Audience::Classes, &["8A".to_string()], &[]));
+        assert!(!scope.may_reach(Audience::Classes, &["9A".to_string()], &[]));
+        assert!(!scope.may_reach(
+            Audience::Classes,
+            &["8A".to_string(), "9A".to_string()],
+            &[]
+        ));
+
+        // Hela skolan och alla elever är administratörens.
+        assert!(!scope.may_reach(Audience::Everyone, &[], &[]));
+        assert!(!scope.may_reach(Audience::Students, &[], &[]));
+
+        // En lärare utan klass i schemat når ingen klass alls.
+        let without = PublicUser {
+            person_id: None,
+            ..account(Role::Teacher)
+        };
+        let empty = InfoScope::build(&state.storage, &without);
+        assert!(empty.classes.is_empty());
+        assert!(!empty.may_reach(Audience::Classes, &["8A".to_string()], &[]));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_teacher_only_reaches_the_students_in_its_own_classes() {
+        let (state, dir) = state();
+        let in_class = class_person(&state, "8A", "elever");
+        let other = class_person(&state, "9A", "elever");
+        let teacher = teacher_with_class(&state, "8A");
+        let scope = InfoScope::build(&state.storage, &teacher);
+
+        assert!(scope.may_reach(Audience::Group, &[], &[in_class.clone()]));
+        assert!(!scope.may_reach(Audience::Group, &[], &[other.clone()]));
+        assert!(!scope.may_reach(
+            Audience::Group,
+            &[],
+            &[in_class.clone(), other.clone()]
+        ));
+
+        // Administratören når alla elever i registret.
+        let admin = InfoScope::build(&state.storage, &account(Role::Admin));
+        assert!(admin.everyone);
+        assert!(admin.may_reach(Audience::Group, &[], &[other.clone()]));
+        assert!(admin.may_reach(Audience::Classes, &["9A".to_string()], &[]));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_group_news_item_reaches_only_the_named_students() {
+        let (state, dir) = state();
+        let linnea = class_person(&state, "9A", "elever");
+        let linus = class_person(&state, "8A", "elever");
+
+        state
+            .storage
+            .save_admin_message(&AdminMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: "meddelande".to_string(),
+                title: "Till Linnea".to_string(),
+                body: "Text".to_string(),
+                created_at_ms: 1,
+                author_name: "Lärare Lind".to_string(),
+                author_id: "konto-larare".to_string(),
+                audience: Audience::Group,
+                class_names: Vec::new(),
+                student_ids: vec![linnea.clone()],
+                priority: Priority::Normal,
+            })
+            .expect("posten borde kunna sparas");
+
+        let addressed = PublicUser {
+            person_id: Some(linnea.clone()),
+            ..account(Role::Student)
+        };
+        let someone_else = PublicUser {
+            person_id: Some(linus.clone()),
+            ..account(Role::Student)
+        };
+
+        assert_eq!(
+            titles(messages_for_user(&state, &addressed).unwrap()),
+            vec!["Till Linnea".to_string()]
+        );
+        assert!(messages_for_user(&state, &someone_else)
+            .unwrap()
+            .is_empty());
+
+        // Ett konto utan person får aldrig en gruppost.
+        assert!(messages_for_user(&state, &account(Role::Student))
+            .unwrap()
+            .is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_teacher_only_edits_its_own_posts() {
+        let teacher = PublicUser {
+            id: "larare-1".to_string(),
+            ..account(Role::Teacher)
+        };
+        let admin = account(Role::Admin);
+
+        assert!(may_edit(&teacher, "larare-1"));
+        assert!(!may_edit(&teacher, "larare-2"));
+        // En äldre post utan avsändare går bara att ändra som administratör.
+        assert!(!may_edit(&teacher, ""));
+        assert!(may_edit(&admin, "larare-1"));
+
+        // Eleven kommer aldrig förbi behörighetskontrollen först.
+        assert!(!Role::Student.can_publish_info());
+    }
+
+    #[test]
+    fn a_signed_out_visitor_cannot_publish() {
+        let (state, dir) = state();
+        assert_eq!(
+            require_publisher(&state).unwrap_err().kind(),
+            "not-signed-in"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_student_cannot_publish_and_a_teacher_can() {
+        let (state, dir) = state();
+
+        // En inloggad elev nekas med "inte behörig" – inte ett tomt svar.
+        sign_in(&state, "elev@edu.ronneby.se", Role::Student);
+        assert_eq!(
+            require_publisher(&state).unwrap_err().kind(),
+            "not-allowed"
+        );
+
+        // En inloggad lärare släpps igenom.
+        sign_in(&state, "larare@edu.ronneby.se", Role::Teacher);
+        assert!(require_publisher(&state).is_ok());
+
+        // En inaktiverad lärare tappar behörigheten direkt.
+        let teacher = sign_in(&state, "larare2@edu.ronneby.se", Role::Teacher);
+        set_active(&state.storage, &teacher.id, false).unwrap();
+        assert_eq!(
+            require_publisher(&state).unwrap_err().kind(),
+            "account-inactive"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// En person i registret, för schematesterna.
@@ -2557,12 +3232,38 @@ mod gate_tests {
         PublicUser {
             id: "konto-1".to_string(),
             email: "elev@edu.ronneby.se".to_string(),
-            display_name: "Elev".to_string(),
+            display_name: role.label().to_string(),
             role,
             role_label: role.label().to_string(),
             active: true,
             person_id: None,
+            permissions: role
+                .permissions()
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
         }
+    }
+
+    /// Registrerar en person i en klass och svarar med personens id.
+    fn class_person(state: &AppState, class_name: &str, kind: &str) -> String {
+        let person = Person {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: kind.to_string(),
+            first_name: "Elev".to_string(),
+            last_name: "Testsson".to_string(),
+            class_name: class_name.to_string(),
+            email: String::new(),
+            subjects: Vec::new(),
+            active: true,
+            created_at_ms: 1,
+        };
+
+        state
+            .storage
+            .save_person(&person)
+            .expect("personen borde kunna sparas");
+        person.id
     }
 
     /// En uppgift, för uppgiftstesterna.

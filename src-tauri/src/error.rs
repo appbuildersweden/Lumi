@@ -27,6 +27,9 @@ pub enum AppError {
     #[error("Bara ett administratörskonto kan göra det här.")]
     NotAdmin,
 
+    #[error("Du har inte behörighet till det här.")]
+    NotAllowed,
+
     #[error("Det finns redan ett konto med den e-postadressen.")]
     EmailTaken,
 
@@ -71,6 +74,7 @@ impl AppError {
             AppError::TooManyAttempts(_) => "too-many-attempts",
             AppError::NotSignedIn => "not-signed-in",
             AppError::NotAdmin => "not-admin",
+            AppError::NotAllowed => "not-allowed",
             AppError::EmailTaken => "email-taken",
             AppError::Unauthorized => "unauthorized",
             AppError::InsufficientCredits => "insufficient-credits",
@@ -171,6 +175,7 @@ mod tests {
             AppError::TooManyAttempts(30),
             AppError::NotSignedIn,
             AppError::NotAdmin,
+            AppError::NotAllowed,
             AppError::EmailTaken,
             AppError::Unauthorized,
             AppError::InsufficientCredits,

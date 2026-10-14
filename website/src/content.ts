@@ -101,7 +101,7 @@ export interface DownloadInfo {
 export const DOWNLOAD: DownloadInfo = {
   available: true,
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
-  version: "0.1.2",
+  version: "0.2.0",
   requirements: [
     "Windows 10 eller 11 (64-bitars)",
     "Ingen administratörsbehörighet behövs – Lumi installeras för din egen användare",

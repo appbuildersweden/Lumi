@@ -69,8 +69,18 @@ I appens datamapp (`%APPDATA%\com.jenst.lumi\data`):
 | `studiematerial.json`  | studiematerial, ett konto per post    |
 | `resultat.json`        | resultat från quiz och prov, per konto |
 | `installningar.json`   | modellval per konto + standarden     |
-| `meddelanden.json`     | meddelanden                         |
+| `meddelanden.json`     | nyheter och meddelanden, med mottagare och vikt |
 | `aktivitetslogg.json`  | administratörens ändringar          |
+
+### Information till eleverna
+
+Skolans information ligger i `meddelanden.json` och läses alltid genom
+backend. Varje post har en mottagare – `alla`, `elever`, `lärare`, en eller
+flera `klass`-er eller en `grupp` av enskilda elever – och en vikt
+(`normal`, `viktig`, `akut`). Administratören når hela skolan och kan ändra
+allt; en lärare når de klasser den undervisar enligt schemat och hanterar sina
+egna poster; eleven läser bara det som gäller eleven eller elevens klass.
+Poster som sparades innan fälten fanns läses som `alla` och `normal`.
 
 ### Egna data per konto
 
@@ -172,11 +182,13 @@ src/
   App.tsx                 navigation mellan kategorierna
   navigation.ts           kategorierna, ikoner och texter
   lib/backend.ts          typade anrop mot Rust-backend
+  lib/info.ts             sortering och texter för skolans information
   components/
     Sidebar.tsx           rosa glassmorphism-meny
     ScrollCue.tsx         rund knapp som visar att det finns mer innehåll
     RichText.tsx          enkel visning av AI-text
     AiNotice.tsx          diskret rad när svaren kommer från en gratismodell
+    InfoComposer.tsx      skapa och ändra information, för admin och lärare
   pages/
     Login.tsx             inloggning mot kontona i backend
     Home.tsx              startsidan: hero-banner, nyheter från skolan, framsteg

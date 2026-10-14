@@ -30,7 +30,7 @@ Knappen är aktiv och hämtar filen från releasen:
 export const DOWNLOAD: DownloadInfo = {
   available: true,           // false visar en inaktiverad knapp i stället
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
-  version: "0.1.2",          // måste höjas för hand vid varje release
+  version: "0.2.0",          // måste höjas för hand vid varje release
   requirements: ["Windows 10 eller 11 (64-bitars)"],
   steps: ["Hämta filen", "Kör installationsprogrammet", "Starta Lumi"],
 };

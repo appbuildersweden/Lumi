@@ -1294,6 +1294,114 @@ button {
   color: var(--ink-600);
 }
 
+/* Vikten syns både som märke och som en tunn kant längs kortet. */
+.message-item__priority {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #7a3a12;
+  background: rgba(246, 216, 176, 0.75);
+}
+
+.message-item__priority.is-akut {
+  color: #8d2b41;
+  background: rgba(240, 190, 200, 0.85);
+}
+
+.message-item--viktig {
+  border-left: 3px solid rgba(214, 150, 74, 0.75);
+}
+
+.message-item--akut {
+  border-left: 3px solid rgba(214, 84, 108, 0.75);
+}
+
+.message-item__tag--quiet {
+  color: var(--ink-600);
+  background: rgba(247, 211, 222, 0.35);
+}
+
+.message-item__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.message-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Formuläret för att publicera information ────────────────────────── */
+
+.info-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 18px 0 4px;
+  padding: 18px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 10px 24px rgba(96, 48, 66, 0.05);
+}
+
+.info-composer .field--wide {
+  grid-column: 1 / -1;
+}
+
+.field textarea {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-900);
+  font-family: inherit;
+  font-size: 14.5px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.field__hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-600);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+/* En viktig post på startsidan får en svag ton så att den syns först. */
+.updates__item.is-noteworthy {
+  background: rgba(246, 216, 176, 0.34);
+}
+
+/* En elev i gruppväljaren visar sin klass som en liten svans. */
+.chip--student {
+  gap: 8px;
+}
+
+.chip__meta {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(247, 211, 222, 0.55);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--plum-700);
+}
+
 /* ── Text från AI:n ──────────────────────────────────────────────────── */
 
 .rich > * + * {

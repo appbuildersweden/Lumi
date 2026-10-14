@@ -13,6 +13,7 @@ import {
   type MaterialKind,
   type StudyMaterial,
 } from "../lib/backend";
+import { isNoteworthy, sortMessages } from "../lib/info";
 import type { ViewId } from "../navigation";
 
 /** Hälsning utifrån tiden på dagen. */
@@ -87,11 +88,8 @@ export default function Home({ onNavigate }: HomeProps) {
     [materials]
   );
 
-  /** Skolans senaste information och meddelanden, nyaste först. */
-  const fromSchool = useMemo(
-    () => [...messages].sort((a, b) => b.createdAtMs - a.createdAtMs).slice(0, 2),
-    [messages]
-  );
+  /** Skolans information, viktigast först och därefter den senaste. */
+  const fromSchool = useMemo(() => sortMessages(messages).slice(0, 2), [messages]);
 
   return (
     <>
@@ -138,9 +136,16 @@ export default function Home({ onNavigate }: HomeProps) {
           ) : (
             <ul className="updates">
               {fromSchool.map((message) => (
-                <li key={message.id} className="updates__item">
+                <li
+                  key={message.id}
+                  className={`updates__item${isNoteworthy(message) ? " is-noteworthy" : ""}`}
+                >
                   <span className="updates__title">
-                    {message.kind === "meddelande" ? "Viktigt: " : ""}
+                    {message.priority === "akut"
+                      ? "Akut: "
+                      : message.priority === "viktig" || message.kind === "meddelande"
+                        ? "Viktigt: "
+                        : ""}
                     {message.title}
                   </span>
                   <span className="updates__meta">

@@ -5,6 +5,8 @@ import {
   listActivity,
   listAdminMessages,
   listAssignments,
+  listClasses,
+  listInfoRecipients,
   listExamResults,
   listExams,
   listPeople,
@@ -19,6 +21,7 @@ import {
   type Assignment,
   type Exam,
   type ExamResult,
+  type InfoRecipient,
   type Person,
   type RoleInfo,
   type ScheduleEntry,
@@ -37,6 +40,10 @@ export interface AdminData {
   schedule: ScheduleEntry[];
   messages: AdminMessage[];
   activity: ActivityEntry[];
+  /** Klasserna i registret, för information som riktas till en klass. */
+  classes: string[];
+  /** Eleverna i registret, för information som riktas till en grupp. */
+  recipients: InfoRecipient[];
 }
 
 const EMPTY: AdminData = {
@@ -51,6 +58,8 @@ const EMPTY: AdminData = {
   schedule: [],
   messages: [],
   activity: [],
+  classes: [],
+  recipients: [],
 };
 
 /**
@@ -80,6 +89,8 @@ export function useAdminData() {
         schedule,
         messages,
         activity,
+        classes,
+        recipients,
       ] = await Promise.all([
         getAdminOverview(),
         listPeople(),
@@ -92,6 +103,8 @@ export function useAdminData() {
         listSchedule(),
         listAdminMessages(),
         listActivity(200),
+        listClasses(),
+        listInfoRecipients(),
       ]);
 
       setData({
@@ -106,6 +119,8 @@ export function useAdminData() {
         schedule,
         messages,
         activity,
+        classes,
+        recipients,
       });
     } catch (raw) {
       setError(toLumiError(raw).message);

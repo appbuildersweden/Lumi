@@ -152,6 +152,44 @@ impl Role {
         }
     }
 
+    // ── Behörigheter för skolans information ──────────────────────────────
+    //
+    // Reglerna ligger här och ingen annanstans. Både kommandona och
+    // gränssnittet läser dem, så en roll får aldrig en egen, påhittad
+    // behörighet i en skärm.
+
+    /// Sant när rollen får publicera information och meddelanden.
+    pub fn can_publish_info(self) -> bool {
+        matches!(self, Role::Admin | Role::Teacher)
+    }
+
+    /// Sant när rollen får ändra och ta bort även andras poster.
+    pub fn can_manage_info(self) -> bool {
+        self.is_admin()
+    }
+
+    /// Vilka mottagare rollen får skriva till. Hela skolan, alla elever och
+    /// personalen är administratörens. Läraren får rikta information till
+    /// klasser och grupper – vilka klasser och elever som är lärarens egna
+    /// avgörs av skolans schema i `info_scope`.
+    pub fn can_address(self, audience: Audience) -> bool {
+        match audience {
+            Audience::Everyone | Audience::Students | Audience::Teachers => self.is_admin(),
+            Audience::Classes | Audience::Group => self.can_publish_info(),
+        }
+    }
+
+    /// Behörigheterna som gränssnittet får se, i en fast ordning.
+    pub fn permissions(self) -> Vec<&'static str> {
+        let mut list: Vec<&'static str> = Vec::new();
+        if self.can_publish_info() {
+            list.push("info.publish");
+        }
+        if self.can_manage_info() {
+            list.push("info.manage");
+        }
+        list
+    }
 }
 
 /// Ett konto i Lumis egen användardatabas.
@@ -354,8 +392,9 @@ impl HasId for ScheduleEntry {
     }
 }
 
-/// Vilka som får läsa en nyhet eller ett meddelande: alla, eleverna eller
-/// lärarna. Äldre poster saknar fältet och gäller alla.
+/// Vilka som får läsa en nyhet eller ett meddelande: alla, eleverna, lärarna,
+/// en bestämd klass eller en grupp av enskilda elever. Äldre poster saknar
+/// fältet och gäller alla.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Audience {
     #[serde(rename = "alla", alias = "", alias = "all")]
@@ -364,7 +403,15 @@ pub enum Audience {
     Students,
     #[serde(rename = "lärare", alias = "larare", alias = "teacher")]
     Teachers,
+    /// En eller flera klasser, namngivna i `class_names` på posten.
+    #[serde(rename = "klass", alias = "klasser", alias = "class", alias = "classes")]
+    Classes,
+    /// En grupp av enskilda elever, namngivna i `student_ids` på posten.
+    #[serde(rename = "grupp", alias = "group")]
+    Group,
 }
+
+
 
 impl Default for Audience {
     fn default() -> Self {
@@ -374,6 +421,10 @@ impl Default for Audience {
 
 impl Audience {
     /// Sant när en inloggad roll får läsa posten. Administratören ser allt.
+    ///
+    /// En klass- eller gruppost kräver att klassnamnet eller eleven stämmer,
+    /// så den kontrolleras av `AdminMessage::visible_to` i stället – här
+    /// räcker rollen inte.
     pub fn includes(self, role: Role) -> bool {
         if role.is_admin() {
             return true;
@@ -383,11 +434,50 @@ impl Audience {
             Audience::Everyone => true,
             Audience::Students => role == Role::Student,
             Audience::Teachers => role.is_teacher(),
+            Audience::Classes | Audience::Group => false,
         }
     }
 }
 
-/// En nyhet eller ett viktigt meddelande som visas på adminens startsida.
+/// Hur viktig en post är. Äldre poster saknar fältet och är normala.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Priority {
+    #[serde(rename = "normal", alias = "", alias = "vanlig", alias = "low")]
+    Normal,
+    #[serde(rename = "viktig", alias = "important", alias = "high")]
+    Important,
+    #[serde(rename = "akut", alias = "brådskande", alias = "bradskande", alias = "urgent")]
+    Urgent,
+}
+
+impl Default for Priority {
+    fn default() -> Self {
+        Priority::Normal
+    }
+}
+
+impl Priority {
+    /// Ordningen när posterna sorteras: brådskande först.
+    pub fn rank(self) -> u8 {
+        match self {
+            Priority::Normal => 0,
+            Priority::Important => 1,
+            Priority::Urgent => 2,
+        }
+    }
+
+}
+
+/// Jämför klassnamn utan att bry sig om versaler eller mellanslag, så att
+/// "9A" och " 9a " räknas som samma klass.
+pub fn same_class(a: &str, b: &str) -> bool {
+    let a = a.trim();
+    let b = b.trim();
+    !a.is_empty() && !b.is_empty() && a.eq_ignore_ascii_case(b)
+}
+
+/// En nyhet eller ett viktigt meddelande som visas på adminens startsida och
+/// i elevens informationsvy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdminMessage {
@@ -399,15 +489,54 @@ pub struct AdminMessage {
     pub created_at_ms: u64,
     #[serde(default)]
     pub author_name: String,
+    /// Kontot som publicerade posten. Sätts av backend ur sessionen och avgör
+    /// vem som får ändra och ta bort den.
+    #[serde(default)]
+    pub author_id: String,
     /// Vilka posten är riktad till. Saknas i äldre poster och betyder då alla.
     #[serde(default)]
     pub audience: Audience,
+    /// Vilka klasser posten gäller när mottagaren är `klass`.
+    #[serde(default)]
+    pub class_names: Vec<String>,
+    /// Vilka enskilda elever posten gäller när mottagaren är `grupp`.
+    /// Id:na pekar på personer i registret, aldrig på konton.
+    #[serde(default)]
+    pub student_ids: Vec<String>,
+    /// Hur viktig posten är.
+    #[serde(default)]
+    pub priority: Priority,
 }
 
 impl AdminMessage {
-    /// Sant när den här rollen får läsa posten.
-    pub fn visible_to(&self, role: Role) -> bool {
-        self.audience.includes(role)
+    /// Sant när den här rollen – med sin klass och sitt person-id – får läsa
+    /// posten.
+    ///
+    /// Urvalet görs alltid i backend. Gränssnittet kan inte välja bort
+    /// filtret, och en elev ser aldrig en annan klass eller grupps post.
+    pub fn visible_to(&self, role: Role, class_name: &str, person_id: &str) -> bool {
+        if role.is_admin() {
+            return true;
+        }
+
+        match self.audience {
+            Audience::Classes => role == Role::Student && self.addressed_to_class(class_name),
+            Audience::Group => role == Role::Student && self.addressed_to_person(person_id),
+            other => other.includes(role),
+        }
+    }
+
+    /// Sant när posten gäller den klass eleven går i.
+    pub fn addressed_to_class(&self, class_name: &str) -> bool {
+        self.class_names
+            .iter()
+            .any(|named| same_class(named, class_name))
+    }
+
+    /// Sant när posten gäller just den här eleven.
+    pub fn addressed_to_person(&self, person_id: &str) -> bool {
+        let person_id = person_id.trim();
+        !person_id.is_empty() && self.student_ids.iter().any(|id| id.trim() == person_id)
     }
 }
 
@@ -837,9 +966,16 @@ impl Storage {
 
     // -- Meddelanden och aktivitetslogg -----------------------------------
 
+    /// Posterna viktigast först och därefter den senaste. Samma ordning som
+    /// gränssnittet visar dem i, så att en viktig post aldrig hamnar underst.
     pub fn admin_messages(&self) -> Result<Vec<AdminMessage>, AppError> {
         let mut items: Vec<AdminMessage> = self.list(MESSAGES_FILE)?;
-        items.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+        items.sort_by(|a, b| {
+            b.priority
+                .rank()
+                .cmp(&a.priority.rank())
+                .then(b.created_at_ms.cmp(&a.created_at_ms))
+        });
         Ok(items)
     }
 

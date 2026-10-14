@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import { CalendarDays, ListChecks, Megaphone, Plus } from "lucide-react";
+import InfoComposer from "../../components/InfoComposer";
 import {
   deleteAdminMessage,
   formatDate,
   saveAdminMessage,
-  type Audience,
+  type AdminMessage,
 } from "../../lib/backend";
+import { audienceText } from "../../lib/info";
 import MonthCalendar from "../MonthCalendar";
 import { WEEKDAY_SHORT, weekdaysWithEntries } from "../calendar";
 import { isoWeek, isoWeekday, longDate, weekdayLabel, weekdayName } from "../derive";
@@ -41,11 +43,8 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
 
   const feedback = useFeedback(data.reload);
   const [publishing, setPublishing] = useState(false);
+  const [editing, setEditing] = useState<AdminMessage | null>(null);
   const [showAllUpdates, setShowAllUpdates] = useState(false);
-  const [kind, setKind] = useState("nyhet");
-  const [audience, setAudience] = useState<Audience>("alla");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
 
   const byTime = (a: { start: string }, b: { start: string }) => a.start.localeCompare(b.start);
 
@@ -72,27 +71,19 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
 
   const shownUpdates = showAllUpdates ? updates : updates.slice(0, UPDATES_PREVIEW);
 
-  async function publish() {
+  /** Sparar en ny eller ändrad post. Formuläret skickar hela innehållet. */
+  async function save(message: AdminMessage) {
+    const wasEdit = Boolean(editing);
     const ok = await feedback.run(
-      () =>
-        saveAdminMessage({
-          id: "",
-          kind,
-          title,
-          body,
-          createdAtMs: 0,
-          authorName: user.displayName,
-          audience,
-        }),
-      kind === "nyhet" ? "Nyheten publicerades." : "Meddelandet publicerades."
+      () => saveAdminMessage(message),
+      wasEdit ? "Uppdateringen sparades." : "Uppdateringen publicerades."
     );
 
     if (ok) {
-      setTitle("");
-      setBody("");
-      setAudience("alla");
+      setEditing(null);
       setPublishing(false);
     }
+    return ok;
   }
 
   return (
@@ -213,7 +204,10 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
               <button
                 type="button"
                 className="icon-button"
-                onClick={() => setPublishing((open) => !open)}
+                onClick={() => {
+                  setEditing(null);
+                  setPublishing((open) => !open);
+                }}
                 aria-expanded={publishing}
                 aria-label="Ny uppdatering"
                 title="Ny uppdatering"
@@ -236,15 +230,30 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
                             {message.kind === "meddelande" ? "Meddelande" : "Nyhet"}
                           </Tag>
                           {message.audience !== "alla" && (
-                            <Tag tone="muted">
-                              {message.audience === "elever" ? "Elever" : "Lärare"}
+                            <Tag tone="muted">{audienceText(message)}</Tag>
+                          )}
+                          {message.priority !== "normal" && (
+                            <Tag tone={message.priority === "akut" ? "bad" : "warn"}>
+                              {message.priority === "akut" ? "Akut" : "Viktig"}
                             </Tag>
                           )}
                         </span>
                         <span className="compact-list__meta clamp-2">
-                          {message.body} · {formatDate(message.createdAtMs)}
+                          {message.body} · {message.authorName} ·{" "}
+                          {formatDate(message.createdAtMs)}
                         </span>
                       </span>
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={feedback.busy}
+                        onClick={() => {
+                          setEditing(message);
+                          setPublishing(true);
+                        }}
+                      >
+                        Ändra
+                      </button>
                       <ConfirmButton
                         label="Ta bort"
                         question="Ta bort uppdateringen?"
@@ -277,64 +286,18 @@ export default function AdminHome({ user, data, go }: AdminPageProps) {
             )}
 
             {publishing && (
-              <>
-                <div className="field-grid">
-                  <label className="field">
-                    <span>Typ</span>
-                    <select value={kind} onChange={(event) => setKind(event.target.value)}>
-                      <option value="nyhet">Nyhet</option>
-                      <option value="meddelande">Viktigt meddelande</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Mottagare</span>
-                    <select
-                      value={audience}
-                      onChange={(event) => setAudience(event.target.value as Audience)}
-                    >
-                      <option value="alla">Alla</option>
-                      <option value="elever">Elever</option>
-                      <option value="lärare">Lärare</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="field-grid">
-                  <label className="field field--wide">
-                    <span>Rubrik</span>
-                    <input
-                      value={title}
-                      onChange={(event) => setTitle(event.target.value)}
-                      placeholder="t.ex. Nya provtider"
-                    />
-                  </label>
-                </div>
-
-                <div className="field-grid">
-                  <label className="field field--wide">
-                    <span>Text</span>
-                    <input
-                      value={body}
-                      onChange={(event) => setBody(event.target.value)}
-                      placeholder="Kort text som visas i listan"
-                    />
-                  </label>
-                </div>
-
-                <div className="toolbar toolbar--tight">
-                  <button
-                    type="button"
-                    className="button button--primary"
-                    onClick={publish}
-                    disabled={feedback.busy || !title.trim() || !body.trim()}
-                  >
-                    Publicera
-                  </button>
-                  <button type="button" className="button" onClick={() => setPublishing(false)}>
-                    Avbryt
-                  </button>
-                </div>
-              </>
+              <InfoComposer
+                editing={editing}
+                classes={data.classes}
+                recipients={data.recipients}
+                canAddressEveryone
+                busy={feedback.busy}
+                onSave={save}
+                onCancel={() => {
+                  setPublishing(false);
+                  setEditing(null);
+                }}
+              />
             )}
           </section>
         </div>
