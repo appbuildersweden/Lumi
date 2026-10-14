@@ -16,6 +16,21 @@ oförändrad på sin egen adress.
 byggdes och signerades (SHA-256 `33d09576a22bddafe975598e04b6cd626520138b0716d01c84d7e7705adc925b`).
 Webbplatsen visar version 0.1.2 och är omladdad.
 
+**Version 0.2.0 är publicerad.** Releasen ligger på
+<https://github.com/appbuildersweden/Lumi/releases/tag/v0.2.0> – informationssystemet
+med klass- och gruppmottagare, vikt och behörighetsstyrd publicering. Filen som
+ligger där är samma fil som byggdes och signerades (SHA-256
+`eb49bf202d6c2f87796246b8dc04975c65b809166601683729f7f7c6baf6215f`), och
+webbplatsen visar version 0.2.0.
+
+**Uppdateringen är provad från den installerade versionen.** En installerad
+0.1.2 startades medan releasen låg ute: den läste manifestet från GitHub, hämtade
+installationsfilen, verifierade signaturen och installerade. Efteråt rapporterade
+både filen och avinstallationsposten i registret version 0.2.0, och den
+installerade appen skiljde sig från den byggda på exakt 3 byte – NSIS-märket
+`NSS` som installationsprogrammet sätter. Kontona, personerna och posterna i
+`%APPDATA%\com.jenst.lumi\data` var oförändrade.
+
 **AI:n kräver en driftsatt tjänst.** Sedan 0.1.2 går alla AI-anrop genom
 tjänsten i [ai-proxy/](../ai-proxy/README.md), och markeringen `GATEWAY_TOKEN` i
 `src-tauri/src/config.rs` måste vara exakt samma värde som hemligheten
@@ -253,7 +268,7 @@ I `website/src/content.ts` (versionsnumret är det som senast publicerades):
 export const DOWNLOAD: DownloadInfo = {
   available: true,    // false tills releasen finns
   url: "https://github.com/appbuildersweden/Lumi/releases/latest/download/Lumi-setup.exe",
-  version: "0.1.2",   // fylls i vid publicering
+  version: "0.2.0",   // fylls i vid publicering
   requirements: ["Windows 10 eller 11 (64-bitars)"],
   steps: ["Hämta filen", "Kör installationsprogrammet", "Starta Lumi"],
 };
